@@ -39,34 +39,48 @@ const BARE_SHEETS = new Set(['actions', 'photo']);
 function Layer({ route, tab, under, leaving }) {
   const ref = useRef(null);
   const C = ROUTES[route.name];
-  useSwipeBack(ref, () => { if (ref.current) ref.current.dataset.swiped = '1'; pop(tab); }, !leaving);
+  useSwipeBack(ref, () => pop(tab), !leaving && !under);
   return html`<div ref=${ref} class=${`layer layer-pushed ${under ? 'layer-under' : ''} ${leaving ? 'layer-leave' : 'layer-enter'}`}>
     ${C ? html`<${C} ...${route} tab=${tab} />` : null}
   </div>`;
 }
 
+// Items removed from `list` stay in the returned array for `ms` so they can animate out.
+// Worked out during render, not in an effect: an effect would leave one render without the item, which unmounts it
+// and re-creates it from scratch (a swiped-away screen would jump back and re-render).
 function useLeaving(list, ms = 320) {
-  const [leaving, setLeaving] = useState([]);
   const prev = useRef(list);
-  useEffect(() => {
+  const leaving = useRef([]);
+  const alive = useRef(true);
+  const [, force] = useState(0);
+  useEffect(() => () => { alive.current = false; }, []);
+  if (prev.current !== list) {
     const removed = prev.current.filter(r => !list.some(x => x.key === r.key));
-    prev.current = list;
+    leaving.current = leaving.current.filter(r => !list.some(x => x.key === r.key));
     if (removed.length) {
-      setLeaving(l => [...l, ...removed]);
-      const t = setTimeout(() => setLeaving(l => l.filter(r => !removed.includes(r))), ms);
-      return () => clearTimeout(t);
+      leaving.current = [...leaving.current, ...removed];
+      setTimeout(() => {
+        leaving.current = leaving.current.filter(r => !removed.includes(r));
+        if (alive.current) force(x => x + 1);
+      }, ms);
     }
-  }, [list]);
-  return leaving;
+    prev.current = list;
+  }
+  return leaving.current;
 }
 
 function TabStack({ tab, Root, active }) {
   const stack = useStore(s => s.ui.stacks[tab]);
-  const leaving = useLeaving(stack);
+  const leaving = useLeaving(stack, 380);
+  // One keyed list: a screen that is popped keeps its DOM node (and its swipe position) while it slides away,
+  // instead of being re-created from scratch.
+  const items = [
+    ...stack.map((r, i) => ({ r, under: i < stack.length - 1, leaving: false })),
+    ...leaving.map(r => ({ r, under: false, leaving: true })),
+  ];
   return html`<div class=${'tabview ' + (active ? 'is-active' : '')} data-tab=${tab} aria-hidden=${!active}>
     <div class=${'layer layer-root ' + (stack.length ? 'layer-under' : '')}><${Root} /></div>
-    ${stack.map((r, i) => html`<${Layer} key=${r.key} route=${r} tab=${tab} under=${i < stack.length - 1} />`)}
-    ${leaving.map(r => html`<${Layer} key=${r.key} route=${r} tab=${tab} leaving />`)}
+    ${items.map(({ r, under, leaving: lv }) => html`<${Layer} key=${r.key} route=${r} tab=${tab} under=${under} leaving=${lv} />`)}
   </div>`;
 }
 

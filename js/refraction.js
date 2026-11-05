@@ -152,8 +152,30 @@ function attach(scroller) {
   current.ro.observe(scroller);
   syncTargets();
   place();
-  rebuild();
+  // Building five copies of a screen is real work; never do it while screens are sliding, or the slide stutters.
+  const wait = settleDelay(scroller);
+  if (wait > 0) {
+    current.settleUntil = performance.now() + wait;
+    if (!current.hosts.tabbar.querySelector('.rf-clone')) Object.values(current.hosts).forEach(h => h.classList.add('rf-pending'));
+    current.timer = setTimeout(() => { if (current && current.scroller === scroller) rebuild(); }, wait + 30);
+  } else {
+    rebuild();
+  }
   if (timelineOK) watchTimeline(scroller);
+}
+
+// Milliseconds until the screen's slide (push, pop or swipe-back) has finished.
+function settleDelay(scroller) {
+  const layer = scroller.closest('.layer');
+  if (!layer || !layer.getAnimations) return 0;
+  let wait = 0;
+  for (const a of layer.getAnimations()) {
+    if (a.playState !== 'running' || !a.effect || !a.effect.getComputedTiming) continue;
+    const t = a.effect.getComputedTiming();
+    const left = (t.endTime || 0) - (t.localTime || 0);
+    if (left > wait) wait = left;
+  }
+  return Math.min(wait, 600);
 }
 
 // Verifies once per screen that the scroll timeline really moves the copy with the content.
@@ -186,7 +208,8 @@ function markDirty() {
   if (!current) return;
   current.dirty = true;
   clearTimeout(current.timer);
-  current.timer = setTimeout(() => { if (!paused && current) rebuild(); }, 140);
+  const delay = Math.max(140, (current.settleUntil || 0) - performance.now());
+  current.timer = setTimeout(() => { if (!paused && current) rebuild(); }, delay);
 }
 
 // Put each host exactly under its bar, in the coordinates of the screen's layer.
@@ -277,6 +300,7 @@ function rebuild() {
   if (!current || !current.inner) return;
   current.dirty = false;
   clearTimeout(current.timer);
+  Object.values(current.hosts).forEach(h => h.classList.remove('rf-pending'));
   const { inner, scroller } = current;
   const origH = [...inner.querySelectorAll(H_SCROLLERS)];
   current.offs.splice(0).forEach(off => off());

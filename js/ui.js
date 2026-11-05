@@ -201,51 +201,111 @@ export function SheetFrame({ sheetKey, title, left, right, children, cls = '', o
   </div>`;
 }
 
-// Edge-swipe back for pushed screens (standalone web apps have no system back gesture).
+// Swipe back for pushed screens (Home Screen web apps have no system back gesture).
+// Works like iOS 26: start at the left edge, or anywhere with a clearly sideways drag. The screen follows the finger
+// 1:1 from the first frame (transforms only, so the compositor moves it), and on release it finishes with the
+// finger's speed, so a quick flick snaps back as fast as a native app.
+const NO_SWIPE = '.chart, .hscroll, .chips-scroll, input, textarea, select, .seg, .stepper, .toggle';
+const UNDER_X = -0.28;     // the screen below sits 28% to the left, as in UIKit
+const UNDER_OPACITY = 0.72;
+
+function clearInline(node) {
+  if (!node) return;
+  node.style.transition = '';
+  node.style.transform = '';
+  node.style.opacity = '';
+}
+
 export function useSwipeBack(ref, onBack, enabled = true) {
   useEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
     let st = null;
+    const underOf = () => {
+      const prev = el.previousElementSibling;
+      return prev && prev.classList.contains('layer') ? prev : null;
+    };
+    const paint = (dx) => {
+      const p = Math.min(1, dx / st.w);
+      el.style.transform = `translate3d(${dx}px,0,0)`;
+      if (st.u) {
+        st.u.style.transform = `translate3d(${(UNDER_X * (1 - p)) * 100}%,0,0)`;
+        st.u.style.opacity = String(UNDER_OPACITY + (1 - UNDER_OPACITY) * p);
+      }
+    };
     const ts = e => {
-      const x = e.touches[0].clientX;
-      if (x > 28) return;
-      st = { x, y: e.touches[0].clientY, dx: 0, t: Date.now(), locked: false };
+      if (e.touches.length !== 1) { st = null; return; }
+      const t = e.touches[0];
+      const edge = t.clientX <= 32;
+      if (!edge && e.target && e.target.closest && e.target.closest(NO_SWIPE)) { st = null; return; }
+      st = { x0: t.clientX, y0: t.clientY, edge, locked: false, dx: 0, w: el.offsetWidth || window.innerWidth, samples: [[e.timeStamp, t.clientX]] };
     };
     const tm = e => {
       if (!st) return;
-      const dx = e.touches[0].clientX - st.x, dy = e.touches[0].clientY - st.y;
+      const t = e.touches[0];
+      const dx = t.clientX - st.x0, dy = t.clientY - st.y0;
       if (!st.locked) {
-        if (Math.abs(dy) > Math.abs(dx) && Math.abs(dy) > 8) { st = null; return; }
-        if (dx > 8) st.locked = true; else return;
+        const adx = Math.abs(dx), ady = Math.abs(dy);
+        if (ady > 10 && ady >= adx) { st = null; return; }     // vertical: let the list scroll
+        if (dx < -8) { st = null; return; }                     // leftward: not a back swipe
+        if (dx < (st.edge ? 6 : 12) || (!st.edge && adx < ady * 1.4)) return;
+        st.locked = true;
+        st.u = underOf();
+        // Stop a slide-in that is still running so it can't hold the screen in place, then follow the finger.
+        el.style.animation = 'none';
+        el.style.transition = 'none';
+        el.classList.add('is-swiping');
+        if (st.u) st.u.style.transition = 'none';
       }
-      e.preventDefault();
+      if (e.cancelable) e.preventDefault();
       st.dx = Math.max(0, dx);
-      el.style.transition = 'none';
-      el.style.transform = `translateX(${st.dx}px)`;
-      const under = el.previousElementSibling;
-      if (under) { under.style.transition = 'none'; under.style.transform = `translateX(${-30 + (st.dx / el.offsetWidth) * 30}%)`; under.style.filter = `brightness(${0.75 + 0.25 * st.dx / el.offsetWidth})`; }
+      paint(st.dx);
+      st.samples.push([e.timeStamp, t.clientX]);
+      if (st.samples.length > 6) st.samples.shift();
     };
-    const te = () => {
+    const te = e => {
       if (!st) return;
-      const { dx, t } = st;
+      const s = st;
       st = null;
-      const v = dx / Math.max(1, Date.now() - t);
-      const under = el.previousElementSibling;
-      el.style.transition = ''; if (under) under.style.transition = '';
-      if (dx > el.offsetWidth * 0.33 || v > 0.5) {
-        el.style.transform = 'translateX(100%)';
-        if (under) { under.style.transform = 'translateX(0)'; under.style.filter = ''; }
-        setTimeout(() => { if (under) { under.style.transform = ''; } onBack(); }, 230);
+      if (!s.locked) return;
+      if (e.cancelable) e.preventDefault();   // no click on whatever row the finger ended on
+      // Release speed from the last ~100 ms of movement, in px per ms.
+      const last = s.samples[s.samples.length - 1];
+      const first = s.samples.find(([t]) => last[0] - t <= 100) || s.samples[0];
+      const v = last[0] > first[0] ? (last[1] - first[1]) / (last[0] - first[0]) : 0;
+      const p = s.dx / s.w;
+      const done = e.type !== 'touchcancel' && ((p > 0.4 && v > -0.15) || (v > 0.3 && s.dx > 20));
+      const ease = 'cubic-bezier(0.22, 0.9, 0.32, 1)';
+      if (done) {
+        const ms = Math.round(Math.min(300, Math.max(150, (s.w - s.dx) / Math.max(v, 1.3))));
+        el.style.transition = `transform ${ms}ms ${ease}`;
+        el.style.transform = `translate3d(${s.w}px,0,0)`;
+        el.dataset.swiped = '1';
+        if (s.u) {
+          const u = s.u;
+          u.style.transition = `transform ${ms}ms ${ease}, opacity ${ms}ms ${ease}`;
+          u.style.transform = 'translate3d(0,0,0)';
+          u.style.opacity = '1';
+          setTimeout(() => clearInline(u), ms + 40);
+        }
+        onBack();   // navigate now; the screen stays mounted while it finishes sliding away
       } else {
-        el.style.transform = '';
-        if (under) { under.style.transform = ''; under.style.filter = ''; }
+        const ms = 220;
+        el.style.transition = `transform ${ms}ms ${ease}`;
+        el.style.transform = 'translate3d(0,0,0)';
+        if (s.u) {
+          s.u.style.transition = `transform ${ms}ms ${ease}, opacity ${ms}ms ${ease}`;
+          s.u.style.transform = `translate3d(${UNDER_X * 100}%,0,0)`;
+          s.u.style.opacity = String(UNDER_OPACITY);
+        }
+        // Keep animation: none, or clearing it would replay the slide-in.
+        setTimeout(() => { el.classList.remove('is-swiping'); clearInline(el); clearInline(s.u); }, ms + 40);
       }
     };
     el.addEventListener('touchstart', ts, { passive: true });
     el.addEventListener('touchmove', tm, { passive: false });
-    el.addEventListener('touchend', te);
-    el.addEventListener('touchcancel', te);
+    el.addEventListener('touchend', te, { passive: false });
+    el.addEventListener('touchcancel', te, { passive: false });
     return () => {
       el.removeEventListener('touchstart', ts); el.removeEventListener('touchmove', tm);
       el.removeEventListener('touchend', te); el.removeEventListener('touchcancel', te);

@@ -105,12 +105,17 @@ svg { display: block; flex: none; }
 .app-behind { transform: translateY(calc(var(--sat) + 4px)) scale(0.93); border-radius: 22px; overflow: hidden; filter: brightness(0.6); }
 .tabview { position: absolute; inset: 0; visibility: hidden; }
 .tabview.is-active { visibility: visible; }
-.layer { position: absolute; inset: 0; background: var(--bg); overflow: hidden; transition: transform 0.42s var(--spring), filter 0.42s; }
+.layer { position: absolute; inset: 0; background: var(--bg); overflow: hidden; transition: transform 0.42s var(--spring), opacity 0.42s var(--spring); }
 .layer-pushed { box-shadow: -12px 0 32px rgba(0, 0, 0, 0.55); }
-.layer-enter { animation: slideIn 0.42s var(--spring) both; }
+/* 'backwards' only: a forwards fill would keep overriding the swipe-back transform after the slide-in ends. */
+.layer-enter { animation: slideIn 0.42s var(--spring) backwards; }
 .layer-leave { animation: slideOut 0.32s var(--spring) forwards; pointer-events: none; z-index: 3; }
 .layer-leave[data-swiped="1"] { animation: none; transform: translateX(100%); }
-.layer-under { transform: translateX(-28%); filter: brightness(0.7); pointer-events: none; }
+.layer-under { transform: translateX(-28%); opacity: 0.72; pointer-events: none; }
+.tabview.is-active .layer-pushed, .tabview.is-active .layer-under { will-change: transform; }
+/* While a swipe-back is under way the row the finger started on must not look pressed. */
+.is-swiping .row-tap:active, .is-swiping .routine-open:active { background: transparent; }
+.is-swiping .card-tap:active, .is-swiping .medal-card:active { transform: none; background: var(--card); }
 
 .bottom-chrome { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; pointer-events: none;
   display: flex; flex-direction: column; align-items: center; gap: 8px;
@@ -137,6 +142,9 @@ svg { display: block; flex: none; }
 .has-refraction .scroller { scroll-timeline: --rf y; }
 .rf-host { position: fixed; z-index: 1; overflow: hidden; pointer-events: none; background: var(--bg); isolation: isolate;
   contain: layout paint style; --rf-r: 31px; }
+/* A freshly opened screen builds its bent copy after its slide-in, then fades it in. */
+.rf-host { transition: opacity 0.18s ease; }
+.rf-host.rf-pending { opacity: 0; }
 .rf-band, .rf-warp, .rf-scroll { position: absolute; inset: 0; }
 .rf-clone { position: absolute; }
 .rf-clone .scroller-inner { pointer-events: none; }
