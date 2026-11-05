@@ -98,9 +98,9 @@ export function SummaryScreen() {
         </div>
         <p class="recap-headline">${recap.headline}</p>
         <div class="recap-mini">
-          <div><b class="num">${recap.workouts}</b><span>workouts</span></div>
+          <div><b class="num">${recap.workouts}</b><span>${recap.workouts === 1 ? 'workout' : 'workouts'}</span></div>
           <div><b class="num">${recap.up}</b><span>improved</span></div>
-          <div><b class="num">${recap.prs.length}</b><span>PRs</span></div>
+          <div><b class="num">${recap.prs.length}</b><span>${recap.prs.length === 1 ? 'PR' : 'PRs'}</span></div>
           <div><b class="num">${recap.volDelta === null ? '–' : pct(recap.volDelta)}</b><span>volume</span></div>
         </div>
         <div class="card-foot">See full recap<${Icon} name="chevR" size=${15} /></div>
