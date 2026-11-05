@@ -323,7 +323,9 @@ svg { display: block; flex: none; }
 .routine-play:active { transform: scale(0.88); }
 .routine-play .ic { margin-left: 2px; }
 .edit-row { align-items: flex-start; }
-.edit-controls { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.edit-controls { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.edit-controls .stepper button { width: 34px; }
+.edit-controls .input-sm { flex: 1; min-width: 0; width: auto; }
 .edit-actions { display: flex; flex-direction: column; margin-right: -6px; }
 .icon-btn-sm { width: 34px; height: 34px; }
 .add-row .row-title { font-weight: 600; }
