@@ -60,7 +60,7 @@ export function SummaryScreen() {
           </div>
           <div class="rl">
             <div class="rl-label">Volume ${r.volumeIsLastWeek ? 'vs last week' : ''}</div>
-            <div class="rl-val num" style="color:var(--ring-v1)">${fmtInt(r.volume)}<span class="rl-long">/${fmtInt(r.volumeGoal)} kg</span><span class="rl-short">/${r.volumeGoal >= 10000 ? fmt(r.volumeGoal / 1000, 1) + 'k' : fmtInt(r.volumeGoal)}</span></div>
+            <div class="rl-val num" style="color:var(--ring-v1)">${fmtInt(r.volume)}<span class="rl-long">/${fmtInt(r.volumeGoal)} kg</span><span class="rl-short">/${r.volumeGoal >= 10000 ? fmt(r.volumeGoal / 1000, 1) + 'k' : fmtInt(r.volumeGoal)} kg</span></div>
           </div>
           <div class="rl">
             <div class="rl-label">New PRs</div>

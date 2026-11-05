@@ -1,6 +1,6 @@
 import { setUI, toast, flushActive } from './store.js';
 
-export const APP_VERSION = '1.0.1';
+export const APP_VERSION = '1.0.2';
 
 let reg = null;
 
