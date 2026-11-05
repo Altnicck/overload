@@ -1,7 +1,7 @@
-import { html, useState } from '../preact.js';
+import { html, useState, useRef, useEffect } from '../preact.js';
 import { Icon } from '../icons.js';
-import { Screen, Section, Thumb, GlassButton, SheetFrame, Stepper, haptic, Empty } from '../ui.js';
-import { useStore, useIndex, startWorkout, setUI, push, pop, openSheet, closeSheet, saveRoutine, deleteRoutine, getState, toast, gymName } from '../store.js';
+import { Screen, Section, Thumb, GlassButton, SheetFrame, Stepper, haptic, Empty, useReorder, moveItem } from '../ui.js';
+import { useStore, useIndex, startWorkout, setUI, push, pop, openSheet, closeSheet, saveRoutine, deleteRoutine, moveRoutine, getState, toast, gymName } from '../store.js';
 import { fmt, relDay, routineLastDone, upNext, fmtClock } from '../logic.js';
 
 function repsText(reps) {
@@ -14,6 +14,8 @@ export function WorkoutScreen() {
   const { routines, workouts, exercises, active } = useStore(s => ({ routines: s.routines, workouts: s.workouts, exercises: s.exercises, active: s.active }));
   const exById = new Map(exercises.map(e => [e.id, e]));
   const next = upNext(routines, workouts);
+  const listRef = useRef(null);
+  useReorder(listRef, { onMove: moveRoutine, enabled: routines.length > 1 });
   return html`<${Screen} title="Workout" tab="workout"
       right=${html`<${GlassButton} icon="plus" title="New routine" onClick=${() => { haptic(); openSheet('routineEditor', {}); }} />`}>
     ${active ? html`<button type="button" class="card card-tap resume-card" onClick=${() => { haptic(); setUI({ workoutOpen: true }); }}>
@@ -32,11 +34,11 @@ export function WorkoutScreen() {
       </div>`}
 
     <${Section} title="Routines" action="New" onAction=${() => openSheet('routineEditor', {})}>
-      ${routines.length ? html`<div class="routine-list">
-        ${routines.map(r => {
+      ${routines.length ? html`<div class="routine-list" ref=${listRef}>
+        ${routines.map((r, ri) => {
           const last = routineLastDone(r.id, workouts);
           const items = (r.items || []).filter(i => exById.has(i.exId));
-          return html`<div key=${r.id} class=${'card routine-card ' + (next && next.id === r.id ? 'is-next' : '')}>
+          return html`<div key=${r.id} class=${'card routine-card ' + (next && next.id === r.id ? 'is-next' : '')} data-ri=${ri}>
             <button type="button" class="routine-open" onClick=${() => { haptic(); push({ name: 'routine', id: r.id }, 'workout'); }}>
               <div class="routine-top">
                 <div>
@@ -71,12 +73,31 @@ export function WorkoutScreen() {
   <//>`;
 }
 
+// The same exercise can appear twice in a routine, so rows are keyed by exercise plus which occurrence it is.
+function itemKeys(items) {
+  const seen = new Map();
+  return items.map(it => { const n = seen.get(it.exId) || 0; seen.set(it.exId, n + 1); return it.exId + '#' + n; });
+}
+
 export function RoutineScreen({ id, tab }) {
   const { routine, exercises, workouts } = useStore(s => ({ routine: s.routines.find(r => r.id === id), exercises: s.exercises, workouts: s.workouts }));
   const index = useIndex();
+  const listRef = useRef(null);
+  // Hold an exercise and drag it: the new order is saved straight away.
+  useReorder(listRef, {
+    onMove: (from, to) => {
+      const r = getState().routines.find(x => x.id === id);
+      if (!r) return;
+      const known = new Set(getState().exercises.map(e => e.id));
+      const shown = (r.items || []).filter(i => known.has(i.exId));
+      const rest = (r.items || []).filter(i => !known.has(i.exId));
+      saveRoutine({ ...r, items: [...moveItem(shown, from, to), ...rest] });
+    },
+  });
   if (!routine) return html`<${Screen} title="Routine" pushed tab=${tab}><div class="card"><${Empty} title="Routine deleted" /></div><//>`;
   const exById = new Map(exercises.map(e => [e.id, e]));
   const items = (routine.items || []).filter(i => exById.has(i.exId));
+  const keys = itemKeys(items);
   const last = routineLastDone(routine.id, workouts);
   return html`<${Screen} title=${routine.name} pushed tab=${tab}
       right=${html`<${GlassButton} icon="pencil" title="Edit routine" onClick=${() => openSheet('routineEditor', { id })} />`}>
@@ -84,11 +105,11 @@ export function RoutineScreen({ id, tab }) {
     <button type="button" class="btn btn-accent btn-block btn-lg" onClick=${() => { haptic('success'); startWorkout({ routine }); }}>
       <${Icon} name="play" size=${18} fill /> Start ${routine.name}
     </button>
-    <div class="list mt">
+    <div class="list mt" ref=${listRef}>
       ${items.map((it, i) => {
         const ex = exById.get(it.exId);
         const st = index.stats.get(ex.id);
-        return html`<button key=${it.exId + i} type="button" class="row row-tap" onClick=${() => push({ name: 'machine', id: ex.id }, tab)}>
+        return html`<button key=${keys[i]} type="button" class="row row-tap" data-ri=${i} onClick=${() => push({ name: 'machine', id: ex.id }, tab)}>
           <${Thumb} photoId=${ex.photoId} muscle=${ex.muscle} size=${52} name=${ex.name} />
           <div class="row-main">
             <div class="row-title clamp2">${ex.name}</div>
@@ -98,39 +119,55 @@ export function RoutineScreen({ id, tab }) {
         </button>`;
       })}
     </div>
+    ${items.length > 1 && html`<p class="list-hint">Hold an exercise and drag it to change the order.</p>`}
     <div class="bottom-space"></div>
   <//>`;
 }
+
+let rowSeq = 0;
+const withKey = it => ({ ...it, _k: 'k' + (++rowSeq) });
 
 export function RoutineEditorSheet({ sheetKey, id }) {
   const s0 = getState();
   const existing = id ? s0.routines.find(r => r.id === id) : null;
   const [name, setName] = useState(existing ? existing.name : '');
-  const [items, setItems] = useState(existing ? (existing.items || []).map(i => ({ ...i, reps: [...(i.reps || [])] })) : []);
+  const [items, setItems] = useState(existing ? (existing.items || []).map(i => withKey({ ...i, reps: [...(i.reps || [])] })) : []);
   const [confirmDel, setConfirmDel] = useState(false);
   const exercises = useStore(s => s.exercises);
   const exById = new Map(exercises.map(e => [e.id, e]));
+  const listRef = useRef(null);
+  useReorder(listRef, { onMove: (from, to) => setItems(cur => moveItem(cur, from, to)) });
+  // An "Undo" offer belongs to this sheet; drop it when the sheet goes away.
+  useEffect(() => () => { const t = getState().ui.toast; if (t && t.scope === sheetKey) setUI({ toast: null }); }, []);
   const save = () => {
     if (!name.trim()) { toast('Give the routine a name'); return; }
-    saveRoutine({ ...(existing || {}), name: name.trim(), items: items.filter(i => exById.has(i.exId)) });
+    saveRoutine({ ...(existing || {}), name: name.trim(), items: items.filter(i => exById.has(i.exId)).map(({ _k, _txt, ...it }) => it) });
     haptic('success');
     closeSheet(sheetKey);
   };
-  const setSets = (i, n) => setItems(items.map((it, j) => {
-    if (j !== i) return it;
+  const edit = (k, fn) => setItems(cur => cur.map(it => (it._k === k ? fn(it) : it)));
+  const setSets = (k, n) => edit(k, it => {
     const reps = [...(it.reps || [])];
     while (reps.length < n) reps.push(reps[reps.length - 1] || 12);
     return { ...it, reps: reps.slice(0, n) };
-  }));
-  const setRepsText = (i, txt) => setItems(items.map((it, j) => {
-    if (j !== i) return it;
+  });
+  const setRepsText = (k, txt) => edit(k, it => {
     const nums = txt.split(/[ ,/]+/).map(x => parseInt(x, 10)).filter(x => x > 0);
     return { ...it, reps: nums.length ? nums : it.reps, _txt: txt };
-  }));
-  const move = (i, d) => { const j = i + d; if (j < 0 || j >= items.length) return; const c = [...items]; [c[i], c[j]] = [c[j], c[i]]; setItems(c); haptic(); };
+  });
+  const remove = it => {
+    haptic();
+    const at = items.indexOf(it);
+    setItems(cur => cur.filter(x => x !== it));
+    const ex = exById.get(it.exId);
+    toast(`Removed ${ex ? ex.name : 'exercise'}`, {
+      action: 'Undo', ms: 5000, scope: sheetKey,
+      onAction: () => { haptic(); setItems(cur => (cur.includes(it) ? cur : [...cur.slice(0, at), it, ...cur.slice(at)])); },
+    });
+  };
   const add = () => openSheet('picker', {
     title: 'Add to Routine', multi: true,
-    onPick: exId => setItems(cur => [...cur, { exId, reps: [12, 12] }]),
+    onPick: exId => setItems(cur => [...cur, withKey({ exId, reps: [12, 12] })]),
   });
   return html`<${SheetFrame} sheetKey=${sheetKey} title=${existing ? 'Edit Routine' : 'New Routine'}
       right=${html`<button type="button" class="btn btn-accent btn-sm" onClick=${save}>Save</button>`}>
@@ -140,25 +177,22 @@ export function RoutineEditorSheet({ sheetKey, id }) {
         <input id="routine-name" class="input" type="text" placeholder="e.g. Push, Legs, Spate Gros" value=${name} onInput=${e => setName(e.currentTarget.value)} autocomplete="off" />
       </label>
       <div class="field-label mt">Exercises</div>
-      <div class="list">
+      <div class="list" ref=${listRef}>
         ${items.map((it, i) => {
           const ex = exById.get(it.exId);
           if (!ex) return null;
-          return html`<div class="row edit-row" key=${it.exId + '-' + i}>
+          return html`<div class="row edit-row" key=${it._k} data-ri=${i}>
             <${Thumb} photoId=${ex.photoId} muscle=${ex.muscle} size=${40} name=${ex.name} />
             <div class="row-main">
               <div class="row-title clamp2">${ex.name}</div>
               <div class="edit-controls">
-                <${Stepper} value=${(it.reps || []).length || 1} min=${1} max=${10} onChange=${n => setSets(i, n)} />
+                <${Stepper} value=${(it.reps || []).length || 1} min=${1} max=${10} onChange=${n => setSets(it._k, n)} />
                 <input class="input input-sm" type="text" inputmode="numeric" aria-label="Target reps" value=${it._txt ?? (it.reps || []).join(', ')}
-                  onInput=${e => setRepsText(i, e.currentTarget.value)} placeholder="12, 10" />
-                <button type="button" class="icon-btn icon-btn-sm danger" aria-label="Remove" onClick=${() => { haptic(); setItems(items.filter((_, j) => j !== i)); }}><${Icon} name="trash" size=${18} /></button>
+                  onInput=${e => setRepsText(it._k, e.currentTarget.value)} placeholder="12, 10" />
+                <button type="button" class="icon-btn icon-btn-sm danger" aria-label="Remove" onClick=${() => remove(it)}><${Icon} name="trash" size=${18} /></button>
               </div>
             </div>
-            <div class="edit-actions">
-              <button type="button" class="icon-btn icon-btn-sm" aria-label="Move up" onClick=${() => move(i, -1)} disabled=${i === 0}><${Icon} name="chevU" size=${18} /></button>
-              <button type="button" class="icon-btn icon-btn-sm" aria-label="Move down" onClick=${() => move(i, 1)} disabled=${i === items.length - 1}><${Icon} name="chevD" size=${18} /></button>
-            </div>
+            <span class="reorder-grip" aria-hidden="true"><${Icon} name="grip" size=${22} stroke=${1.8} /></span>
           </div>`;
         })}
         <button type="button" class="row row-tap add-row" onClick=${add}>
@@ -166,6 +200,7 @@ export function RoutineEditorSheet({ sheetKey, id }) {
           <div class="row-main"><div class="row-title tint">Add exercise</div></div>
         </button>
       </div>
+      ${items.length > 1 && html`<p class="list-hint">Hold an exercise, or drag its handle, to change the order.</p>`}
       ${existing && html`<div class="mt-lg">
         ${confirmDel ? html`<div class="confirm-box">
             <p>Delete "${existing.name}"? Your logged workouts stay.</p>

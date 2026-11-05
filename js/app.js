@@ -14,7 +14,7 @@ import { WorkoutScreen, RoutineScreen, RoutineEditorSheet } from './screens/work
 import { MachinesScreen, MachineScreen, MachineEditorSheet } from './screens/machines.js';
 import { ProgressScreen, RecapsScreen, RecapSheet } from './screens/progress.js';
 import { HistoryScreen, WorkoutDetailScreen, WorkoutEditSheet } from './screens/history.js';
-import { ActiveWorkout, FinishedSheet, DateTimeSheet } from './screens/active.js';
+import { ActiveWorkout, FinishedSheet, DateTimeSheet, ReorderExercisesSheet } from './screens/active.js';
 import { ActionSheet, PromptSheet, PhotoViewer, PickerSheet } from './screens/sheets.js';
 import { SettingsSheet } from './screens/settings.js';
 import { Onboarding } from './screens/onboarding.js';
@@ -32,7 +32,7 @@ const ROUTES = {
 const SHEETS = {
   settings: SettingsSheet, recap: RecapSheet, machineEditor: MachineEditorSheet, routineEditor: RoutineEditorSheet,
   picker: PickerSheet, actions: ActionSheet, prompt: PromptSheet, photo: PhotoViewer, finished: FinishedSheet,
-  workoutEdit: WorkoutEditSheet, datetime: DateTimeSheet,
+  workoutEdit: WorkoutEditSheet, datetime: DateTimeSheet, reorderExercises: ReorderExercisesSheet,
 };
 const BARE_SHEETS = new Set(['actions', 'photo']);
 
@@ -162,7 +162,10 @@ function Toast() {
   return html`<div class="toasts" aria-live="polite">
     ${update && html`<div class="toast glass toast-update"><${Icon} name="sparkle" size=${17} /><span>A new version is ready</span>
       <button type="button" class="btn btn-accent btn-xs" onClick=${() => { setUI({ update: false }); applyUpdate(); }}>Restart</button></div>`}
-    ${toast && html`<div key=${toast.key} class="toast glass">${toast.text}</div>`}
+    ${toast && (toast.action
+      ? html`<div key=${toast.key} class="toast glass toast-action"><span>${toast.text}</span>
+          <button type="button" class="toast-btn" onClick=${() => { setUI({ toast: null }); toast.onAction && toast.onAction(); }}>${toast.action}</button></div>`
+      : html`<div key=${toast.key} class="toast glass">${toast.text}</div>`)}
   </div>`;
 }
 

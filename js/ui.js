@@ -245,6 +245,7 @@ export function useSwipeBack(ref, onBack, enabled = true) {
       const t = e.touches[0];
       const dx = t.clientX - st.x0, dy = t.clientY - st.y0;
       if (!st.locked) {
+        if (document.documentElement.classList.contains('drag-active')) { st = null; return; }   // a row is being reordered
         const adx = Math.abs(dx), ady = Math.abs(dy);
         if (ady > 10 && ady >= adx) { st = null; return; }     // vertical: let the list scroll
         if (dx < -8) { st = null; return; }                     // leftward: not a back swipe
@@ -309,6 +310,273 @@ export function useSwipeBack(ref, onBack, enabled = true) {
     return () => {
       el.removeEventListener('touchstart', ts); el.removeEventListener('touchmove', tm);
       el.removeEventListener('touchend', te); el.removeEventListener('touchcancel', te);
+    };
+  }, [enabled]);
+}
+
+// ---------- hold-and-drag reordering ----------
+// The list's children with data-ri (the item's index in the data) can be reordered: hold one, or touch its grip, and
+// it lifts under the finger; the other rows slide out of its way and the list scrolls by itself near the edges.
+// Letting go drops it into the gap. Only transforms move while dragging, and the new order is committed once, after
+// the drop has settled, so the re-render lands exactly where the rows already are.
+const LIFT_MS = 340;     // hold time before a row lifts
+const SLOP = 8;          // finger movement (px) that turns a hold into a scroll
+const EDGE = 76;         // auto-scroll zone (px) at the top and bottom of the visible list
+
+export function moveItem(arr, from, to) {
+  const c = [...arr];
+  const [x] = c.splice(from, 1);
+  c.splice(to, 0, x);
+  return c;
+}
+
+export function useReorder(ref, { onMove, enabled = true, handle = '.reorder-grip', ignore = 'input, textarea, select' } = {}) {
+  const cb = useRef(onMove);
+  cb.current = onMove;
+  useEffect(() => {
+    const list = ref.current;
+    if (!list || !enabled) return;
+    const root = document.documentElement;
+    let pend = null;        // a hold that has not lifted yet
+    let drag = null;        // the lifted row
+    let busy = false;       // a drop is settling
+    let quietUntil = 0;     // swallow the click a drop would otherwise cause
+    let lastTouch = -1e9;
+
+    const rowsOf = () => [...list.children].filter(n => n.hasAttribute('data-ri'));
+    const byId = (touches, id) => { for (const t of touches) if (t.identifier === id) return t; return null; };
+    // The part of the scroller the person can actually see: below the top bar and above the floating tab bar.
+    const bandOf = sc => {
+      const r = sc.getBoundingClientRect();
+      let top = Math.max(0, r.top), bottom = Math.min(window.innerHeight, r.bottom);
+      const screen = sc.closest('.screen');
+      if (screen) {
+        const bar = screen.querySelector(':scope > .topbar');
+        if (bar) top = Math.max(top, bar.getBoundingClientRect().bottom);
+        const chrome = document.querySelector('.bottom-chrome');
+        if (chrome) { const c = chrome.getBoundingClientRect(); if (c.height > 0) bottom = Math.min(bottom, c.top); }
+      }
+      return { top, bottom };
+    };
+
+    const begin = (target, x, y, id) => {
+      if (busy || drag || pend || !target || !target.closest) return;
+      const row = target.closest('[data-ri]');
+      if (!row || row.parentElement !== list) return;
+      const grip = !!target.closest(handle);
+      if (!grip && target.closest(ignore)) return;
+      pend = { row, x0: x, y0: y, x, y, id, timer: 0 };
+      if (grip) lift();
+      else pend.timer = setTimeout(lift, LIFT_MS);
+    };
+    const cancelPend = () => { if (pend) { clearTimeout(pend.timer); pend = null; } };
+
+    const lift = () => {
+      const p = pend;
+      pend = null;
+      if (!p) return;
+      clearTimeout(p.timer);
+      const { row } = p;
+      // A back swipe that already took this touch keeps it.
+      if (!row.isConnected || row.closest('.is-swiping') || root.classList.contains('drag-active')) return;
+      const rows = rowsOf();
+      const from = rows.indexOf(row);
+      if (from < 0 || rows.length < 2) return;
+      const sc = list.closest('.sheet-body, .scroller');
+      const s0 = sc ? sc.scrollTop : 0;
+      const rects = rows.map(r => r.getBoundingClientRect());
+      const tops = rects.map(r => r.top + s0);       // content coordinates: unaffected by later scrolling
+      const hs = rects.map(r => r.height);
+      const gap = Math.max(0, tops[1] - tops[0] - hs[0]);
+      drag = { row, rows, from, to: from, tops, hs, gap, sc, s0, y0: p.y, y: p.y, id: p.id, off: 0, raf: 0, band: sc ? bandOf(sc) : null };
+      root.classList.add('drag-active');
+      list.classList.add('is-reordering');
+      row.classList.add('is-lifted');
+      window.addEventListener('touchstart', stale, true);
+      document.addEventListener('visibilitychange', hidden);
+      haptic();
+    };
+
+    // Rows keep their separator lines in the order they now appear in.
+    const markSeparators = d => {
+      if (!d.row.classList.contains('row')) return;
+      d.rows.forEach((r, i) => {
+        if (i === d.from) return;
+        const vis = i < d.from ? (i >= d.to ? i + 1 : i) : (i <= d.to ? i - 1 : i);
+        if (vis === 0) r.dataset.sep = '0';
+        else if (i === 0) r.dataset.sep = '1';
+        else r.removeAttribute('data-sep');
+      });
+    };
+
+    const paint = () => {
+      const d = drag;
+      const n = d.rows.length;
+      const scrolled = d.sc ? d.sc.scrollTop - d.s0 : 0;
+      const lo = d.tops[0] - d.tops[d.from] - 6;
+      const hi = d.tops[n - 1] + d.hs[n - 1] - d.hs[d.from] - d.tops[d.from] + 6;
+      d.off = Math.max(lo, Math.min(hi, d.y - d.y0 + scrolled));
+      d.row.style.translate = `0 ${d.off}px`;
+      // Take a neighbour's place once the row's leading edge passes the middle of it.
+      const top = d.tops[d.from] + d.off, bottom = top + d.hs[d.from];
+      let to = d.from;
+      for (let i = d.from + 1; i < n && bottom > d.tops[i] + d.hs[i] / 2; i++) to = i;
+      for (let i = d.from - 1; i >= 0 && top < d.tops[i] + d.hs[i] / 2; i--) to = i;
+      if (to === d.to) return;
+      d.to = to;
+      const shift = d.hs[d.from] + d.gap;
+      d.rows.forEach((r, i) => {
+        if (i === d.from) return;
+        const y = i > d.from && i <= to ? -shift : i < d.from && i >= to ? shift : 0;
+        r.style.translate = y ? `0 ${y}px` : '';
+      });
+      markSeparators(d);
+      haptic();
+    };
+
+    // Near the top or bottom edge the list scrolls by itself, faster the closer the finger gets (up to ~1100 px/s).
+    const autoScroll = () => {
+      const d = drag;
+      if (!d || !d.sc || !d.band || d.raf) return;
+      if (!d.moved) { if (Math.abs(d.y - d.y0) < 12) return; d.moved = true; }   // not for a row merely held at the edge
+      let last = performance.now();
+      const tick = now => {
+        d.raf = 0;
+        if (drag !== d) return;
+        const dt = Math.min(48, Math.max(1, now - last));
+        last = now;
+        const { top, bottom } = d.band;
+        let k = 0;
+        if (d.y < top + EDGE) k = -Math.min(1, (top + EDGE - d.y) / EDGE);
+        else if (d.y > bottom - EDGE) k = Math.min(1, (d.y - (bottom - EDGE)) / EDGE);
+        if (!k) return;
+        const max = d.sc.scrollHeight - d.sc.clientHeight;
+        const cur = d.sc.scrollTop;
+        if ((k < 0 && cur <= 0) || (k > 0 && cur >= max - 0.5)) return;
+        d.acc = (d.acc || 0) + Math.sign(k) * k * k * 1.15 * dt;
+        const step = Math.trunc(d.acc);
+        if (step) { d.acc -= step; d.sc.scrollTop = Math.max(0, Math.min(max, cur + step)); paint(); }
+        d.raf = requestAnimationFrame(tick);
+      };
+      d.raf = requestAnimationFrame(tick);
+    };
+
+    const drop = cancelled => {
+      const d = drag;
+      if (!d) return;
+      drag = null;
+      cancelAnimationFrame(d.raf);
+      window.removeEventListener('touchstart', stale, true);
+      document.removeEventListener('visibilitychange', hidden);
+      busy = true;
+      if (!cancelled) haptic();   // runs inside touchend, where iOS allows the haptic tick
+      const to = cancelled ? d.from : d.to;
+      if (to !== d.to) d.rows.forEach((r, i) => { if (i !== d.from) r.style.translate = ''; });
+      const end = (to > d.from ? d.tops[to] + d.hs[to] - d.hs[d.from] : d.tops[to]) - d.tops[d.from];
+      const ms = Math.round(Math.min(280, 170 + Math.abs(end - d.off) * 0.4));
+      const ease = 'cubic-bezier(0.2, 0.9, 0.3, 1)';
+      d.row.style.transition = `translate ${ms}ms ${ease}, scale ${ms}ms ${ease}, box-shadow ${ms}ms ease, background-color ${ms}ms ease, border-radius ${ms}ms ease`;
+      d.row.classList.remove('is-lifted');
+      d.row.classList.add('is-settling');
+      d.row.style.translate = `0 ${end}px`;
+      quietUntil = performance.now() + ms + 350;
+      setTimeout(() => {
+        // Commit. The list re-renders in the new order before the next frame, so clearing the offsets is invisible.
+        if (to !== d.from && cb.current) cb.current(+d.row.dataset.ri, +d.rows[to].dataset.ri);
+        d.rows.forEach(r => { r.style.translate = ''; r.style.transition = ''; r.removeAttribute('data-sep'); });
+        d.row.classList.remove('is-settling');
+        list.classList.remove('is-reordering');
+        root.classList.remove('drag-active');
+        window.dispatchEvent(new Event('reorder-end'));
+        busy = false;
+      }, ms + 16);
+    };
+    // A touch that ended without telling us (the system took it) must not leave a row floating.
+    const stale = e => { if (drag && typeof drag.id === 'number' && !byId(e.touches, drag.id)) drop(true); };
+    const hidden = () => { if (document.visibilityState === 'hidden') drop(true); };
+
+    const ts = e => {
+      lastTouch = performance.now();
+      if (e.touches.length > 1) { cancelPend(); return; }
+      const t = e.changedTouches[0];
+      begin(e.target, t.clientX, t.clientY, t.identifier);
+    };
+    const tm = e => {
+      lastTouch = performance.now();
+      if (pend) {
+        const t = byId(e.touches, pend.id);
+        if (!t) return;
+        pend.x = t.clientX; pend.y = t.clientY;
+        if (Math.abs(t.clientX - pend.x0) > SLOP || Math.abs(t.clientY - pend.y0) > SLOP) cancelPend();   // it's a scroll
+        return;
+      }
+      if (!drag) return;
+      const t = byId(e.touches, drag.id);
+      if (!t) return;
+      if (e.cancelable) e.preventDefault();   // the list must not scroll under the finger
+      e.stopPropagation();                    // nor may a back swipe start
+      drag.y = t.clientY;
+      paint();
+      autoScroll();
+    };
+    const te = e => {
+      lastTouch = performance.now();
+      if (pend) { if (byId(e.changedTouches, pend.id)) cancelPend(); return; }
+      if (!drag || !byId(e.changedTouches, drag.id)) return;
+      if (e.cancelable) e.preventDefault();   // no tap on the row that was just dropped
+      e.stopPropagation();
+      drop(e.type === 'touchcancel');
+    };
+
+    // Mouse (iPad trackpad, desktop): same gestures, with the button held.
+    const mm = e => {
+      if (pend) {
+        pend.x = e.clientX; pend.y = e.clientY;
+        if (Math.abs(e.clientX - pend.x0) > SLOP || Math.abs(e.clientY - pend.y0) > SLOP) { cancelPend(); unbindMouse(); }
+        return;
+      }
+      if (!drag) return;
+      e.preventDefault();
+      drag.y = e.clientY;
+      paint();
+      autoScroll();
+    };
+    const mu = () => { unbindMouse(); if (pend) cancelPend(); else if (drag && drag.id === 'mouse') drop(false); };
+    const unbindMouse = () => { window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', mu); };
+    const md = e => {
+      if (e.button !== 0 || performance.now() - lastTouch < 900) return;   // ignore the mouse events a tap imitates
+      begin(e.target, e.clientX, e.clientY, 'mouse');
+      if (pend || drag) { window.addEventListener('mousemove', mm); window.addEventListener('mouseup', mu); }
+      if (drag) e.preventDefault();
+    };
+
+    const click = e => { if (busy || performance.now() < quietUntil) { e.preventDefault(); e.stopPropagation(); } };
+    const menu = e => { if (pend || drag) e.preventDefault(); };
+
+    list.addEventListener('touchstart', ts, { passive: true });
+    list.addEventListener('touchmove', tm, { passive: false });
+    list.addEventListener('touchend', te, { passive: false });
+    list.addEventListener('touchcancel', te, { passive: false });
+    list.addEventListener('mousedown', md);
+    list.addEventListener('click', click, true);
+    list.addEventListener('contextmenu', menu);
+    return () => {
+      list.removeEventListener('touchstart', ts);
+      list.removeEventListener('touchmove', tm);
+      list.removeEventListener('touchend', te);
+      list.removeEventListener('touchcancel', te);
+      list.removeEventListener('mousedown', md);
+      list.removeEventListener('click', click, true);
+      list.removeEventListener('contextmenu', menu);
+      unbindMouse();
+      cancelPend();
+      if (drag) {
+        cancelAnimationFrame(drag.raf);
+        drag = null;
+        window.removeEventListener('touchstart', stale, true);
+        document.removeEventListener('visibilitychange', hidden);
+        root.classList.remove('drag-active');
+      }
     };
   }, [enabled]);
 }

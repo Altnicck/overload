@@ -205,6 +205,17 @@ export function saveRoutine(r) {
   db.put('routines', x);
   return x;
 }
+// Drag-to-reorder on the Workout tab: renumber every routine so the order sticks.
+export function moveRoutine(from, to) {
+  const list = [...state.routines];
+  const [r] = list.splice(from, 1);
+  if (!r) return;
+  list.splice(to, 0, r);
+  const routines = list.map((x, i) => (x.order === i ? x : { ...x, order: i }));
+  const changed = routines.filter((x, i) => x !== list[i]);
+  setState({ routines });
+  if (changed.length) db.putMany('routines', changed);
+}
 export function deleteRoutine(id) {
   setState({ routines: state.routines.filter(r => r.id !== id) });
   db.del('routines', id);

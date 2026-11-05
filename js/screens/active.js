@@ -1,6 +1,6 @@
 import { html, useState, useEffect, useRef } from '../preact.js';
 import { Icon } from '../icons.js';
-import { Thumb, GlassButton, SheetFrame, haptic, chime } from '../ui.js';
+import { Thumb, GlassButton, SheetFrame, haptic, chime, useReorder, moveItem } from '../ui.js';
 import {
   useStore, useIndex, getState, setUI, updateActive, newEntry, checkSetPR, finishActive, discardActive,
   openSheet, closeSheet, banner, toast, saveExercise, gymName, getIndex, updateSettings, push, flushActive,
@@ -120,10 +120,9 @@ function ExerciseBlock({ en, ei, total, ex, last, workoutId }) {
     title: ex ? ex.name : 'Exercise', actions: [
       { label: 'Machine details & history', icon: 'chart', onSelect: () => { setUI({ workoutOpen: false }); push({ name: 'machine', id: en.exId }, 'machines'); setUI({ tab: 'machines' }); } },
       { label: ex && ex.notes ? 'Edit machine settings' : 'Add machine settings', icon: 'sliders', onSelect: () => editNotes(ex) },
-      ...(ei > 0 ? [{ label: 'Move up', icon: 'chevU', onSelect: () => move(ei, -1) }] : []),
-      ...(ei < total - 1 ? [{ label: 'Move down', icon: 'chevD', onSelect: () => move(ei, 1) }] : []),
+      ...(total > 1 ? [{ label: 'Reorder exercises', icon: 'grip', onSelect: () => openSheet('reorderExercises', {}) }] : []),
       { label: 'Replace exercise', icon: 'swap', onSelect: () => openSheet('picker', { title: 'Replace With', gymId: getState().active.gymId, onPick: id => updateActive(a => ({ ...a, entries: a.entries.map((x, i) => (i !== ei ? x : newEntry(id, x.target, x.sets.length))) })) }) },
-      { label: 'Remove from workout', icon: 'trash', destructive: true, onSelect: () => updateActive(a => ({ ...a, entries: a.entries.filter((_, i) => i !== ei) })) },
+      { label: 'Remove from workout', icon: 'trash', destructive: true, onSelect: () => removeEntry(en.id, ex) },
     ],
   });
   return html`<section class="card ex-block">
@@ -152,13 +151,17 @@ function ExerciseBlock({ en, ei, total, ex, last, workoutId }) {
   </section>`;
 }
 
-function move(i, d) {
-  updateActive(a => {
-    const j = i + d;
-    if (j < 0 || j >= a.entries.length) return a;
-    const e = [...a.entries];
-    [e[i], e[j]] = [e[j], e[i]];
-    return { ...a, entries: e };
+// Removing an exercise also drops its logged sets, so it can be undone for a few seconds.
+function removeEntry(entryId, ex) {
+  const a = getState().active;
+  if (!a) return;
+  const at = a.entries.findIndex(x => x.id === entryId);
+  if (at < 0) return;
+  const entry = a.entries[at];
+  updateActive(x => ({ ...x, entries: x.entries.filter(y => y.id !== entryId) }));
+  toast(`Removed ${ex ? ex.name : 'exercise'}`, {
+    action: 'Undo', ms: 5000,
+    onAction: () => updateActive(x => (x.entries.some(y => y.id === entryId) ? x : { ...x, entries: [...x.entries.slice(0, at), entry, ...x.entries.slice(at)] })),
   });
 }
 function editNotes(ex) {
@@ -210,6 +213,7 @@ export function ActiveWorkout() {
     title: active.name, actions: [
       { label: 'Rename workout', icon: 'pencil', onSelect: () => promptSheet({ title: 'Workout Name', value: active.name, onSave: v => v.trim() && updateActive(a => ({ ...a, name: v.trim() })) }) },
       { label: 'Change date & time', icon: 'calendar', onSelect: () => openSheet('datetime', {}) },
+      ...(active.entries.length > 1 ? [{ label: 'Reorder exercises', icon: 'grip', onSelect: () => openSheet('reorderExercises', {}) }] : []),
       { label: 'Discard workout', icon: 'trash', destructive: true, onSelect: () => confirmSheet({ title: 'Discard this workout?', message: 'Logged sets in this session will be lost.', confirm: 'Discard', onConfirm: () => { discardActive(); toast('Workout discarded'); } }) },
     ],
   });
@@ -256,6 +260,33 @@ export function ActiveWorkout() {
       </div>
     </div>
   </div>`;
+}
+
+// Exercise order during a workout: a compact list to drag, since the full set cards are too tall to move around.
+export function ReorderExercisesSheet({ sheetKey }) {
+  const { active, exercises } = useStore(s => ({ active: s.active, exercises: s.exercises }));
+  const listRef = useRef(null);
+  useReorder(listRef, { onMove: (from, to) => updateActive(a => ({ ...a, entries: moveItem(a.entries, from, to) })) });
+  const done = html`<button type="button" class="btn btn-accent btn-sm" onClick=${() => closeSheet(sheetKey)}>Done</button>`;
+  if (!active) return html`<${SheetFrame} sheetKey=${sheetKey} title="Exercise Order" right=${done}><div class="list" ref=${listRef}></div><//>`;
+  const exById = new Map(exercises.map(e => [e.id, e]));
+  return html`<${SheetFrame} sheetKey=${sheetKey} title="Exercise Order" cls="sheet-compact" right=${done}>
+    <div class="list" ref=${listRef}>
+      ${active.entries.map((en, i) => {
+        const ex = exById.get(en.exId);
+        const ticked = en.sets.filter(s => s.done).length;
+        return html`<div class="row" key=${en.id} data-ri=${i}>
+          <${Thumb} photoId=${ex && ex.photoId} muscle=${ex && ex.muscle} size=${40} name=${ex ? ex.name : ''} />
+          <div class="row-main">
+            <div class="row-title clamp2">${ex ? ex.name : 'Exercise'}</div>
+            <div class="row-sub">${ticked ? `${ticked} of ${en.sets.length} sets done` : `${en.sets.length} ${en.sets.length === 1 ? 'set' : 'sets'}`}</div>
+          </div>
+          <span class="reorder-grip" aria-hidden="true"><${Icon} name="grip" size=${22} stroke=${1.8} /></span>
+        </div>`;
+      })}
+    </div>
+    <p class="list-hint">Hold an exercise, or drag its handle, to change the order.</p>
+  <//>`;
 }
 
 export function DateTimeSheet({ sheetKey }) {

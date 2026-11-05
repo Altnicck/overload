@@ -52,6 +52,12 @@ export function initRefraction() {
   // Layer slide animations finishing change which screen is on top.
   document.addEventListener('animationend', e => { if (e.target && e.target.classList && e.target.classList.contains('layer')) schedule(); }, true);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') schedule(true); });
+  // After a drag-to-reorder the copy shows the old order: keep it hidden until it has been rebuilt.
+  window.addEventListener('reorder-end', () => {
+    if (!current || paused || !current.dirty) return;
+    Object.values(current.hosts).forEach(h => h.classList.add('rf-pending'));
+    markDirty();
+  });
   schedule();
 }
 
@@ -208,6 +214,8 @@ function markDirty() {
   if (!current) return;
   current.dirty = true;
   clearTimeout(current.timer);
+  // Rows being dragged change every frame; copy the list once, when it has been dropped (see 'reorder-end').
+  if (document.documentElement.classList.contains('drag-active')) return;
   const delay = Math.max(140, (current.settleUntil || 0) - performance.now());
   current.timer = setTimeout(() => { if (!paused && current) rebuild(); }, delay);
 }

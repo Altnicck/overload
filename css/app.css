@@ -381,9 +381,30 @@ svg { display: block; flex: none; }
 .edit-controls { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
 .edit-controls .stepper button { width: 34px; }
 .edit-controls .input-sm { flex: 1; min-width: 0; width: auto; }
-.edit-actions { display: flex; flex-direction: column; margin-right: -6px; }
 .icon-btn-sm { width: 34px; height: 34px; }
 .add-row .row-title { font-weight: 600; }
+.list-hint { margin: 10px 6px 0; font-size: 13px; line-height: 1.35; color: var(--text-3); text-align: center; }
+
+/* ---------- hold-and-drag reordering ---------- */
+[data-ri] img { -webkit-user-drag: none; pointer-events: none; }
+.reorder-grip { flex: none; align-self: center; width: 42px; height: 46px; margin: -6px -12px -6px -6px; display: grid; place-items: center;
+  color: var(--text-3); touch-action: none; cursor: grab; }
+.list.is-reordering { overflow: visible; }
+.is-reordering > [data-ri] { transition: translate 0.26s cubic-bezier(0.2, 0.9, 0.3, 1); }
+.is-reordering > .is-lifted { position: relative; z-index: 8; scale: 1.03; background: var(--card-2); border-radius: 14px;
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.6), 0 3px 10px rgba(0, 0, 0, 0.35), inset 0 0.5px 0 rgba(255, 255, 255, 0.12);
+  transition: scale 0.22s var(--spring), box-shadow 0.22s ease, background-color 0.22s ease, border-radius 0.22s ease; }
+.is-reordering > .is-settling { position: relative; z-index: 8; }
+.is-lifted .input { background: #1e1e21; }
+.is-lifted .reorder-grip { color: var(--text-2); }
+.is-lifted::before, .is-settling::before, .list > .row[data-sep="0"]::before { opacity: 0; }
+.list > .row[data-sep="1"]::before { content: ""; position: absolute; top: 0; left: var(--sep-inset); right: 0; height: 0.5px; background: var(--sep); }
+.is-reordering > [data-ri]:not(.is-lifted):active { background: transparent; transform: none; }
+.drag-active .rf-host { opacity: 0; }
+.routine-list.is-reordering > .is-lifted { border-radius: var(--r); }
+.routine-list.is-reordering > .is-lifted.is-next { box-shadow: inset 0 0 0 1.5px rgba(198, 244, 50, 0.5), 0 18px 38px rgba(0, 0, 0, 0.6), 0 3px 10px rgba(0, 0, 0, 0.35); }
+.is-reordering .routine-open:active { background: transparent; }
+.is-lifted .routine-play:active { transform: none; }
 
 /* ---------- active workout ---------- */
 .cover { position: fixed; inset: 0; z-index: 40; background: var(--bg); transform: translateY(102%); visibility: hidden;
@@ -575,6 +596,9 @@ svg { display: block; flex: none; }
 .toasts { position: fixed; left: 0; right: 0; bottom: calc(max(12px, calc(var(--sab) - 12px)) + 76px); display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 95; pointer-events: none; padding: 0 16px; }
 .toast { pointer-events: auto; padding: 11px 18px; border-radius: 22px; font-size: 15px; font-weight: 600; animation: toastIn 0.38s var(--bounce) both; max-width: 100%; text-align: center; background: var(--glass-strong); }
 .toast-update { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; }
+.toast-action { display: flex; align-items: center; gap: 12px; padding: 7px 7px 7px 18px; }
+.toast-btn { height: 32px; padding: 0 14px; border-radius: 16px; background: rgba(255, 255, 255, 0.14); color: var(--accent); font-weight: 700; font-size: 15px; }
+.toast-btn:active { background: rgba(255, 255, 255, 0.24); }
 .toast-update .ic { color: var(--accent); }
 
 /* ---------- onboarding ---------- */
