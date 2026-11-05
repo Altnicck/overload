@@ -2,8 +2,10 @@ import { html } from '../preact.js';
 import { Icon } from '../icons.js';
 import { Screen, Section, Rings, GlassButton, haptic, Empty } from '../ui.js';
 import { useStore, useIndex, openSheet, startWorkout, setUI, push, recapKeyToShow } from '../store.js';
-import { fmtInt, fmt, weekKey, addDays, keyToDate, weekRecap, lifetimeCount, streakWeeks, nextMilestone, upNext, routineLastDone, relDay, fmtWeekRange, fmtClock, wTime, isDone, pct } from '../logic.js';
-import { VerdictChip, WorkoutRow, PRMedal, openExercise, openRecap } from './common.js';
+import { fmtInt, fmt, weekKey, addDays, keyToDate, weekRecap, lifetimeCount, streakWeeks, nextMilestone, upNext, routineLastDone, relDay, fmtWeekRange, fmtClock, wTime, isDone, pct, ymd, weekStart, plural } from '../logic.js';
+import { BodyThumb, BodyMap } from '../body.js';
+import { routineSets, levelsFrom } from '../anatomy.js';
+import { VerdictChip, WorkoutRow, PRMedal, MusclesCard, openExercise, openRecap } from './common.js';
 
 export function weekRings(index, settings, now = new Date()) {
   const k = weekKey(now);
@@ -21,6 +23,20 @@ export function weekRings(index, settings, now = new Date()) {
     volume: W.volume, volumeGoal: volGoal, volumeIsLastWeek: !!(P && P.volume > 0),
     prs: W.prs, prsGoal: settings.prGoal || 3,
   };
+}
+
+const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+// Monday to Sunday of this week, lit on the days you trained.
+function WeekStrip({ list, now }) {
+  const start = weekStart(now);
+  const done = new Set(list.map(w => ymd(w.startedAt)));
+  const today = ymd(now);
+  return html`<div class="week-strip" aria-label="Days trained this week">
+    ${DAY_LETTERS.map((d, i) => { const day = ymd(addDays(start, i)); const on = done.has(day);
+      return html`<div key=${i} class=${'wd ' + (on ? 'on ' : '') + (day === today ? 'today ' : '') + (day > today ? 'future' : '')}>
+        <span>${d}</span><i>${on ? html`<${Icon} name="check" size=${13} stroke=${3.2} />` : ''}</i></div>`; })}
+  </div>`;
 }
 
 export function SummaryScreen() {
@@ -68,6 +84,7 @@ export function SummaryScreen() {
           </div>
         </div>
       </div>
+      <${WeekStrip} list=${index.list} now=${now} />
     </section>
 
     ${active ? html`<button type="button" class="card card-tap resume-card" onClick=${() => { haptic(); setUI({ workoutOpen: true }); }}>
@@ -80,6 +97,7 @@ export function SummaryScreen() {
         <span class="btn btn-accent btn-sm">Resume</span>
       </button>`
     : html`<div class="card start-card">
+        ${next && html`<${BodyThumb} levels=${levelsFrom(routineSets(next, exById))} width=${58} height=${66} radius=${15} />`}
         <div class="row-main">
           <div class="eyebrow">Up next</div>
           <div class="resume-title">${next ? next.name : 'Empty workout'}</div>
@@ -90,6 +108,8 @@ export function SummaryScreen() {
         </button>
       </div>`}
 
+    <${MusclesCard} list=${index.list} exById=${exById} now=${now} />
+
     <${Section} title="Weekly Recap" action="Past weeks" onAction=${() => push({ name: 'recaps' }, 'summary')}>
       <button type="button" class="card card-tap recap-card" onClick=${() => { haptic(); openRecap(recapK); }}>
         <div class="recap-top">
@@ -98,10 +118,10 @@ export function SummaryScreen() {
         </div>
         <p class="recap-headline">${recap.headline}</p>
         <div class="recap-mini">
-          <div><b class="num">${recap.workouts}</b><span>${recap.workouts === 1 ? 'workout' : 'workouts'}</span></div>
-          <div><b class="num">${recap.up}</b><span>improved</span></div>
-          <div><b class="num">${recap.prs.length}</b><span>${recap.prs.length === 1 ? 'PR' : 'PRs'}</span></div>
-          <div><b class="num">${recap.volDelta === null ? '–' : pct(recap.volDelta)}</b><span>volume</span></div>
+          <div style="--ic:var(--ring-w1)"><i><${Icon} name="dumbbell" size=${16} stroke=${2.2} /></i><b class="num">${recap.workouts}</b><span>${recap.workouts === 1 ? 'workout' : 'workouts'}</span></div>
+          <div style="--ic:#30d158"><i><${Icon} name="up" size=${16} stroke=${2.4} /></i><b class="num">${recap.up}</b><span>improved</span></div>
+          <div style="--ic:var(--ring-p2)"><i><${Icon} name="trophy" size=${16} stroke=${2.2} /></i><b class="num">${recap.prs.length}</b><span>${recap.prs.length === 1 ? 'PR' : 'PRs'}</span></div>
+          <div style=${`--ic:${recap.volDelta !== null && recap.volDelta < 0 ? '#ff7a45' : 'var(--accent)'}`}><i><${Icon} name="chart" size=${16} stroke=${2.2} /></i><b class="num">${recap.volDelta === null ? '–' : pct(recap.volDelta)}</b><span>volume</span></div>
         </div>
         <div class="card-foot">See full recap<${Icon} name="chevR" size=${15} /></div>
       </button>

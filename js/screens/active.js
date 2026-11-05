@@ -7,7 +7,7 @@ import {
 } from '../store.js';
 import { fmt, fmtInt, fmtClock, fmtDate, fmtDuration, lastSession, num, e1rm, MODE, workoutVolume, wTime, lifetimeCount, fmtTime, ymd } from '../logic.js';
 import { confirmSheet, promptSheet } from './sheets.js';
-import { Delta } from './common.js';
+import { Delta, WorkedCard } from './common.js';
 
 function Timer({ since }) {
   const [, tick] = useState(0);
@@ -128,7 +128,7 @@ function ExerciseBlock({ en, ei, total, ex, last, workoutId }) {
   return html`<section class="card ex-block">
     <div class="ex-head">
       <button type="button" class="ex-thumb-btn" onClick=${() => ex && ex.photoId ? openSheet('photo', { photoId: ex.photoId, name: ex.name }) : editPhotoHint(ex)} aria-label="Machine photo">
-        <${Thumb} photoId=${ex && ex.photoId} muscle=${ex && ex.muscle} size=${56} name=${ex ? ex.name : ''} />
+        <${Thumb} ex=${ex} size=${56} />
       </button>
       <div class="ex-title">
         <h3 class="clamp2">${ex ? ex.name : 'Deleted exercise'}</h3>
@@ -185,6 +185,7 @@ export function ActiveWorkout() {
   if (!active) return null;
   const exById = new Map(exercises.map(e => [e.id, e]));
   const { volume, sets } = workoutVolume(active, exById);
+  const planned = active.entries.reduce((a, en) => a + en.sets.length, 0);
   const finish = () => {
     const a = getState().active;
     const any = a.entries.some(en => en.sets.some(s => s.done));
@@ -248,6 +249,10 @@ export function ActiveWorkout() {
           <span class="chip chip-static num">${sets} sets · ${fmtInt(volume)} kg</span>
           <button type="button" class="chip" onClick=${menu} aria-label="Workout options"><${Icon} name="dots" size=${16} stroke=${3} /></button>
         </div>
+        ${planned > 0 && html`<div class="cover-progress" aria-label=${`${sets} of ${planned} sets done`}>
+          <div class="cp-bar"><i style=${`width:${Math.min(100, (sets / planned) * 100)}%`}></i></div>
+          <span class="num">${sets}/${planned} sets</span>
+        </div>`}
         ${active.entries.map((en, ei) => html`<${ExerciseBlock} key=${en.id} en=${en} ei=${ei} total=${active.entries.length} ex=${exById.get(en.exId)}
             last=${lastSession(index, en.exId, Infinity, active.id)} workoutId=${active.id} />`)}
         ${!active.entries.length && html`<div class="card cover-empty">
@@ -276,7 +281,7 @@ export function ReorderExercisesSheet({ sheetKey }) {
         const ex = exById.get(en.exId);
         const ticked = en.sets.filter(s => s.done).length;
         return html`<div class="row" key=${en.id} data-ri=${i}>
-          <${Thumb} photoId=${ex && ex.photoId} muscle=${ex && ex.muscle} size=${40} name=${ex ? ex.name : ''} />
+          <${Thumb} ex=${ex} size=${40} />
           <div class="row-main">
             <div class="row-title clamp2">${ex ? ex.name : 'Exercise'}</div>
             <div class="row-sub">${ticked ? `${ticked} of ${en.sets.length} sets done` : `${en.sets.length} ${en.sets.length === 1 ? 'set' : 'sets'}`}</div>
@@ -339,6 +344,7 @@ export function FinishedSheet({ sheetKey, id }) {
       <div class="stat"><div class="stat-label">Sets</div><div class="stat-value num">${sets}</div></div>
       <div class="stat"><div class="stat-label">New PRs</div><div class="stat-value num" style=${prs.length ? 'color:var(--ring-p2)' : ''}>${prs.length}</div></div>
     </div>
+    <${WorkedCard} w=${workout} exById=${exById} />
     ${prs.length > 0 && html`<div class="group-label">Personal records</div>
       <div class="list">${prs.map(p => html`<div class="row" key=${p.exId}>
         <div class="row-ic" style="--ic:var(--ring-p2)"><${Icon} name="trophy" size=${20} /></div>
@@ -348,7 +354,7 @@ export function FinishedSheet({ sheetKey, id }) {
       </div>`)}</div>`}
     <div class="group-label">Compared with last time</div>
     <div class="list">${rows.map(r => html`<div class="row" key=${r.en.id}>
-      <${Thumb} photoId=${r.ex && r.ex.photoId} muscle=${r.ex && r.ex.muscle} size=${40} name=${r.ex ? r.ex.name : ''} />
+      <${Thumb} ex=${r.ex} size=${40} />
       <div class="row-main"><div class="row-title clamp2">${r.ex ? r.ex.name : 'Exercise'}</div>
         <div class="row-sub">Best ${fmt(r.cur.best.w)} × ${r.cur.best.r}${r.prev ? ` · last ${fmt(r.prev.best.w)} × ${r.prev.best.r}` : ' · first time'}</div></div>
       <div class="row-end">${r.prev ? html`<${Delta} d=${r.d} digits=${1} />` : html`<span class="muted small">New</span>`}</div>

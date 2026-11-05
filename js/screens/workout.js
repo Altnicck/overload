@@ -2,7 +2,9 @@ import { html, useState, useRef, useEffect } from '../preact.js';
 import { Icon } from '../icons.js';
 import { Screen, Section, Thumb, GlassButton, SheetFrame, Stepper, haptic, Empty, useReorder, moveItem } from '../ui.js';
 import { useStore, useIndex, startWorkout, setUI, push, pop, openSheet, closeSheet, saveRoutine, deleteRoutine, moveRoutine, getState, toast, gymName } from '../store.js';
-import { fmt, relDay, routineLastDone, upNext, fmtClock } from '../logic.js';
+import { fmt, relDay, routineLastDone, upNext, fmtClock, plural, startOfDay } from '../logic.js';
+import { BodyThumb, BodyMap } from '../body.js';
+import { routineSets, levelsFrom, topRegions } from '../anatomy.js';
 
 function repsText(reps) {
   if (!reps || !reps.length) return '';
@@ -38,18 +40,16 @@ export function WorkoutScreen() {
         ${routines.map((r, ri) => {
           const last = routineLastDone(r.id, workouts);
           const items = (r.items || []).filter(i => exById.has(i.exId));
-          return html`<div key=${r.id} class=${'card routine-card ' + (next && next.id === r.id ? 'is-next' : '')} data-ri=${ri}>
+          const isNext = next && next.id === r.id;
+          const sets = items.reduce((a, i) => a + ((i.reps && i.reps.length) || 3), 0);
+          return html`<div key=${r.id} class=${'card routine-card ' + (isNext ? 'is-next' : '')} data-ri=${ri}>
             <button type="button" class="routine-open" onClick=${() => { haptic(); push({ name: 'routine', id: r.id }, 'workout'); }}>
-              <div class="routine-top">
-                <div>
-                  ${next && next.id === r.id && html`<div class="eyebrow tint">Up next</div>`}
-                  <div class="routine-name">${r.name}</div>
-                  <div class="muted small">${items.length} exercises · ${last ? relDay(last) : 'Not done yet'}</div>
-                </div>
-              </div>
-              <div class="routine-thumbs">
-                ${items.slice(0, 6).map(i => { const ex = exById.get(i.exId); return html`<${Thumb} key=${i.exId} photoId=${ex.photoId} muscle=${ex.muscle} size=${34} name=${ex.name} />`; })}
-                ${items.length > 6 && html`<span class="more-count">+${items.length - 6}</span>`}
+              <${BodyThumb} levels=${levelsFrom(routineSets({ items }, exById))} width=${82} height=${92} radius=${18} cls="routine-art" />
+              <div class="routine-info">
+                ${isNext && html`<div class="eyebrow tint">Up next</div>`}
+                <div class="routine-name">${r.name}</div>
+                <div class="routine-meta">${plural(items.length, 'exercise')} · ${sets} sets</div>
+                <div class="routine-when"><${Icon} name="clock" size=${13} stroke=${2.2} />${last ? relDay(last) : 'Not done yet'}</div>
               </div>
             </button>
             <button type="button" class="routine-play" aria-label=${'Start ' + r.name} onClick=${() => { haptic('success'); startWorkout({ routine: r }); }}>
@@ -71,6 +71,16 @@ export function WorkoutScreen() {
     <//>
     <div class="bottom-space"></div>
   <//>`;
+}
+
+// "3 days" / "ago" for the small stat tiles.
+function since(t) {
+  const days = Math.round((startOfDay(new Date()) - startOfDay(new Date(t))) / 864e5);
+  if (days <= 0) return ['Today', 'last done'];
+  if (days === 1) return ['1 day', 'ago'];
+  if (days < 14) return [`${days} days`, 'ago'];
+  if (days < 61) return [`${Math.round(days / 7)} weeks`, 'ago'];
+  return [`${Math.round(days / 30.4)} months`, 'ago'];
 }
 
 // The same exercise can appear twice in a routine, so rows are keyed by exercise plus which occurrence it is.
@@ -99,9 +109,21 @@ export function RoutineScreen({ id, tab }) {
   const items = (routine.items || []).filter(i => exById.has(i.exId));
   const keys = itemKeys(items);
   const last = routineLastDone(routine.id, workouts);
+  const work = routineSets({ items }, exById);
+  const top = topRegions(work, 6);
+  const sets = items.reduce((a, i) => a + ((i.reps && i.reps.length) || 3), 0);
   return html`<${Screen} title=${routine.name} pushed tab=${tab}
       right=${html`<${GlassButton} icon="pencil" title="Edit routine" onClick=${() => openSheet('routineEditor', { id })} />`}>
-    <p class="muted lead">${items.length} exercises · ${last ? 'Last done ' + relDay(last).toLowerCase() : 'Not done yet'}${routine.gymId ? ' · ' + gymName(routine.gymId) : ''}</p>
+    <section class="card body-card" aria-label="Muscles this routine trains">
+      <${BodyMap} levels=${levelsFrom(work)} height=${232} captions />
+      ${top.length > 0 && html`<div class="mtags">${top.map(t => html`<span class="mtag" key=${t.id} style=${`--l:${Math.max(0.3, t.sets / top[0].sets).toFixed(2)}`}><i></i>${t.label}<b class="num">${Math.max(1, Math.round(t.sets))}</b></span>`)}</div>`}
+    </section>
+    <div class="mini-stats">
+      <div class="mini-stat"><${Icon} name="dumbbell" size=${18} /><b class="num">${items.length}</b><span>${items.length === 1 ? 'exercise' : 'exercises'}</span></div>
+      <div class="mini-stat"><${Icon} name="list" size=${18} /><b class="num">${sets}</b><span>sets</span></div>
+      <div class="mini-stat"><${Icon} name="clock" size=${18} /><b>${last ? since(last)[0] : 'New'}</b><span>${last ? since(last)[1] : 'not done yet'}</span></div>
+    </div>
+    ${routine.gymId && html`<p class="muted small gym-line"><${Icon} name="pin" size=${13} stroke=${2.2} /> ${gymName(routine.gymId)}</p>`}
     <button type="button" class="btn btn-accent btn-block btn-lg" onClick=${() => { haptic('success'); startWorkout({ routine }); }}>
       <${Icon} name="play" size=${18} fill /> Start ${routine.name}
     </button>
@@ -110,7 +132,7 @@ export function RoutineScreen({ id, tab }) {
         const ex = exById.get(it.exId);
         const st = index.stats.get(ex.id);
         return html`<button key=${keys[i]} type="button" class="row row-tap" data-ri=${i} onClick=${() => push({ name: 'machine', id: ex.id }, tab)}>
-          <${Thumb} photoId=${ex.photoId} muscle=${ex.muscle} size=${52} name=${ex.name} />
+          <${Thumb} ex=${ex} size=${52} />
           <div class="row-main">
             <div class="row-title clamp2">${ex.name}</div>
             <div class="row-sub">${repsText(it.reps) || 'Sets as last time'}${st && st.bestE ? ` · best ${fmt(st.bestE)} kg` : ''}</div>
@@ -182,7 +204,7 @@ export function RoutineEditorSheet({ sheetKey, id }) {
           const ex = exById.get(it.exId);
           if (!ex) return null;
           return html`<div class="row edit-row" key=${it._k} data-ri=${i}>
-            <${Thumb} photoId=${ex.photoId} muscle=${ex.muscle} size=${40} name=${ex.name} />
+            <${Thumb} ex=${ex} size=${40} />
             <div class="row-main">
               <div class="row-title clamp2">${ex.name}</div>
               <div class="edit-controls">

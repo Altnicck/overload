@@ -165,6 +165,7 @@ export function SettingsSheet({ sheetKey, focus }) {
       ${screenFit.checked && html`<div class="row"><div class="row-main"><div class="row-title">Screen fit</div><div class="row-sub">Checks that the app reaches the bottom of the screen</div></div>
         <span class=${'num ' + (screenFit.gap ? 'muted' : 'tint')}>${screenFit.gap ? `${screenFit.gap} pt short` : 'Full screen'}</span></div>`}
       <button type="button" class="row row-tap" onClick=${checkForUpdate}><div class="row-main"><div class="row-title tint">Check for updates</div></div><${Icon} name="refresh" size=${18} cls="tint" /></button>
+      <a class="row row-tap" href="https://github.com/HichamELBSI/react-native-body-highlighter" target="_blank" rel="noopener"><div class="row-main"><div class="row-title">Body map artwork</div><div class="row-sub">react-native-body-highlighter by ELABBASSI Hicham · MIT License</div></div><${Icon} name="link" size=${17} cls="muted" /></a>
       <button type="button" class="row row-tap" onClick=${() => { closeSheet(sheetKey); setUI({ tab: 'summary' }); setTimeout(() => updateSettings({ onboarded: false, installSkipped: true }), 300); }}><div class="row-main"><div class="row-title">Show welcome screens again</div></div></button>
     </div>
 

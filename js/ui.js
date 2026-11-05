@@ -2,6 +2,8 @@ import { html, useState, useEffect, useRef } from './preact.js';
 import { Icon } from './icons.js';
 import { usePhoto, getState, pop, closeSheet } from './store.js';
 import { MUSCLE } from './logic.js';
+import { BodyThumb } from './body.js';
+import { musclesFor } from './anatomy.js';
 
 // ---------- haptics + sound ----------
 let hapticLabel = null;
@@ -55,15 +57,14 @@ export function GlassButton({ icon, label, onClick, tint, cls = '', size = 44, t
   </button>`;
 }
 
-export function Thumb({ photoId, muscle, size = 48, radius, cls = '', name }) {
+// An exercise's picture: the machine photo when there is one, otherwise the muscles it works.
+export function Thumb({ ex, photoId, muscle, size = 48, radius, cls = '', name, movement }) {
+  if (ex) { photoId = ex.photoId; muscle = ex.muscle; name = ex.name; movement = ex.movement; }
   const url = usePhoto(photoId, 'thumb');
   const m = MUSCLE[muscle] || MUSCLE.other;
   const r = radius ?? Math.round(size * 0.26);
-  const style = `width:${size}px;height:${size}px;border-radius:${r}px;--mc:${m.color}`;
-  if (url) return html`<div class=${'thumb ' + cls} style=${style}><img src=${url} alt=${name || ''} loading="lazy" decoding="async" /></div>`;
-  const letters = (name || m.label).replace(/[^A-Za-z0-9 ]/g, '').split(' ').filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
-  return html`<div class=${'thumb thumb-ph ' + cls} style=${style} aria-hidden="true">
-    <span style=${`font-size:${Math.round(size * 0.34)}px`}>${letters}</span></div>`;
+  if (url) return html`<div class=${'thumb ' + cls} style=${`width:${size}px;height:${size}px;border-radius:${r}px;--mc:${m.color}`}><img src=${url} alt=${name || ''} loading="lazy" decoding="async" /></div>`;
+  return html`<${BodyThumb} levels=${musclesFor(ex || { muscle, name, movement })} size=${size} radius=${r} cls=${'thumb ' + cls} />`;
 }
 
 export function Segmented({ options, value, onChange, cls = '' }) {

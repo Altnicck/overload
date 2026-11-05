@@ -11,6 +11,7 @@ A gym tracker built for one lifter who trains on a lot of different machines at 
 - **Weekly recap.** Every Monday the app compares last week with the session before it on each exercise and labels the week Strong gain, Gain, Maintained or Dip. It also lists PRs and any machine that has stalled for three sessions.
 - **Lifetime counter and streak.** Starts from 1,219 workouts (1,067 before Jefit + 152 in Jefit) and counts up with every workout you finish.
 - **Progress charts.** Est. 1RM, top weight and volume per machine, plus weekly volume and workouts.
+- **Body maps.** Every routine, workout and machine shows the muscles it trains on a front and back figure, and Summary and Progress show a heat map of the muscles you have worked lately. The figures come from react-native-body-highlighter (MIT); see `LICENSES.md`.
 - **Works offline.** After the first launch the whole app is cached on the phone.
 
 Est. 1RM uses the Epley formula (weight × (1 + reps / 30)), the same one Jefit uses, so imported numbers line up.

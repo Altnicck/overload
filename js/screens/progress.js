@@ -3,14 +3,50 @@ import { Icon } from '../icons.js';
 import { Screen, Section, Thumb, SheetFrame, Segmented, haptic, Empty, muscleColor } from '../ui.js';
 import { BarChart, Sparkline } from '../charts.js';
 import { useStore, useIndex, push, openSheet, recapKeyToShow, gymName } from '../store.js';
-import { fmt, fmtInt, fmtDate, weekKey, addDays, keyToDate, weekRecap, fmtWeekRange, pct, plural } from '../logic.js';
-import { VerdictChip, Delta, openRecap } from './common.js';
+import { fmt, fmtInt, fmtDate, weekKey, addDays, keyToDate, weekRecap, fmtWeekRange, pct, plural, ymd, weekStart } from '../logic.js';
+import { VerdictChip, Delta, MusclesCard, openRecap } from './common.js';
 
 function lastNWeeks(n, now = new Date()) {
   const out = [];
   let k = weekKey(now);
   for (let i = 0; i < n; i++) { out.unshift(k); k = weekKey(addDays(keyToDate(k), -7)); }
   return out;
+}
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Every day of the last few months as a square, brighter the more sets you did.
+function ConsistencyCard({ list, weeks = 18, onDay }) {
+  const now = new Date();
+  const start = addDays(weekStart(now), -7 * (weeks - 1));
+  const byDay = new Map();
+  for (const w of list) {
+    const k = ymd(w.startedAt);
+    const n = w.entries.reduce((a, en) => a + en.sets.filter(x => x.done !== false).length, 0);
+    byDay.set(k, (byDay.get(k) || 0) + Math.max(1, n));
+  }
+  const today = ymd(now);
+  let count = 0;
+  const cols = [];
+  for (let c = 0; c < weeks; c++) {
+    const colStart = addDays(start, c * 7);
+    const label = colStart.getDate() <= 7 ? MONTH_SHORT[colStart.getMonth()] : '';
+    const cells = [];
+    for (let r = 0; r < 7; r++) {
+      const d = addDays(colStart, r);
+      const k = ymd(d);
+      const n = byDay.get(k) || 0;
+      if (n && k <= today) count++;
+      const lvl = k > today ? 'f' : !n ? '0' : n < 10 ? '1' : n < 18 ? '2' : '3';
+      cells.push(html`<i key=${k} class=${'cg-' + lvl} title=${n ? `${fmtDate(d)} · ${n} sets` : fmtDate(d)}></i>`);
+    }
+    cols.push(html`<div class="cg-col" key=${c}><span class="cg-m">${label}</span>${cells}</div>`);
+  }
+  return html`<section class="card cg-card" aria-label="Training days">
+    <div class="card-head"><h3>Consistency</h3><span class="muted small">${plural(count, 'day')} trained · ${weeks} weeks</span></div>
+    <div class="cg-grid">${cols}</div>
+    <div class="cg-legend"><span>Less</span><i class="cg-0"></i><i class="cg-1"></i><i class="cg-2"></i><i class="cg-3"></i><span>More sets</span></div>
+  </section>`;
 }
 
 export function ProgressScreen() {
@@ -48,8 +84,8 @@ export function ProgressScreen() {
     <${Segmented} value=${view} onChange=${setView} options=${[{ value: 'records', label: 'Records' }, { value: 'trends', label: 'Trends' }]} />
     ${view === 'records' ? html`
       <div class="pr-summary">
-        <div><b class="num">${recs.length}</b><span>machines with a record</span></div>
-        <div><b class="num">${totalPRs}</b><span>PRs logged</span></div>
+        <div style="--ic:var(--accent)"><i><${Icon} name="dumbbell" size=${18} stroke=${2.2} /></i><b class="num">${recs.length}</b><span>machines with a record</span></div>
+        <div style="--ic:var(--ring-p2)"><i><${Icon} name="trophy" size=${18} stroke=${2.2} /></i><b class="num">${totalPRs}</b><span>PRs logged</span></div>
       </div>
       <div class="sort-row">
         <span class="muted small">Sort</span>
@@ -59,7 +95,7 @@ export function ProgressScreen() {
         const ss = index.byEx.get(ex.id) || [];
         const spark = ss.slice(-8).map(s => s.best.e);
         return html`<button key=${ex.id} type="button" class="row row-tap rec-row" onClick=${() => { haptic(); push({ name: 'machine', id: ex.id }, 'progress'); }}>
-          <${Thumb} photoId=${ex.photoId} muscle=${ex.muscle} size=${46} name=${ex.name} />
+          <${Thumb} ex=${ex} size=${46} />
           <div class="row-main">
             <div class="row-title clamp2">${ex.name}</div>
             <div class="row-sub">${st.best && !st.baselineWins ? `${fmt(st.best.w)} × ${st.best.r} · ${fmtDate(st.best.t)}` : (ex.baseline && ex.baseline.label) || ''}${ex.gymId ? '' : ''}</div>
@@ -71,6 +107,8 @@ export function ProgressScreen() {
         </button>`;
       })}</div>` : html`<div class="card"><${Empty} icon="trophy" title="No records yet" text="Log sets and your best estimated 1RM per machine appears here." /></div>`}
     ` : html`
+      <${ConsistencyCard} list=${index.list} />
+      <${MusclesCard} list=${index.list} exById=${index.exById} days=${30} rows=${6} target=${36} title="Muscle balance" sub="Last 30 days" />
       <${Section} title="Volume per week">
         <div class="card chart-card"><${BarChart} bars=${volBars} unit="kg" color="var(--ring-v1)" title="This week" format=${v => fmtInt(v)} />
           ${importedOnly && html`<p class="muted small chart-note">Weeks before ${firstApp ? fmtDate(firstApp.startedAt) : 'your first Overload workout'} only include the Jefit sessions visible in your recording.</p>`}</div>
@@ -80,7 +118,7 @@ export function ProgressScreen() {
       <//>
       <${Section} title="Most improved · 90 days">
         ${improved.length ? html`<div class="list">${improved.slice(0, 6).map(r => html`<button key=${r.ex.id} type="button" class="row row-tap" onClick=${() => push({ name: 'machine', id: r.ex.id }, 'progress')}>
-          <${Thumb} photoId=${r.ex.photoId} muscle=${r.ex.muscle} size=${40} name=${r.ex.name} />
+          <${Thumb} ex=${r.ex} size=${40} />
           <div class="row-main"><div class="row-title clamp2">${r.ex.name}</div><div class="row-sub num">${fmt(r.first)} → ${fmt(r.best)} kg est. 1RM</div></div>
           <div class="row-end"><${Delta} d=${r.d} digits=${1} /></div>
         </button>`)}</div>` : html`<div class="card"><${Empty} icon="chart" title="Not enough data yet" text="After two sessions on a machine, its gain shows up here." /></div>`}
@@ -146,7 +184,7 @@ export function RecapSheet({ sheetKey, week }) {
       if (!rows.length) return null;
       return html`<div class="group-label">${g.title} <span class="muted">${rows.length}</span></div>
         <div class="list">${rows.map(x => { const ex = exById.get(x.exId); return html`<div class="row" key=${x.exId}>
-          <${Thumb} photoId=${ex && ex.photoId} muscle=${ex && ex.muscle} size=${40} name=${ex ? ex.name : ''} />
+          <${Thumb} ex=${ex} size=${40} />
           <div class="row-main"><div class="row-title clamp2">${ex ? ex.name : 'Exercise'}</div>
             <div class="row-sub num">${x.before ? `${fmt(x.before.best.w)}×${x.before.best.r} → ` : ''}${fmt(x.cur.best.w)}×${x.cur.best.r}${multiGym && ex && ex.gymId ? ' · ' + gymName(ex.gymId) : ''}</div></div>
           <div class="row-end">${x.before ? html`<${Delta} d=${x.de} digits=${1} />` : html`<span class="muted small">New</span>`}</div>

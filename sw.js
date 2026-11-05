@@ -1,10 +1,10 @@
 // Offline-first service worker: the whole app is cached, so it opens instantly with no signal.
 // Bump VERSION on every release; the app shows "A new version is ready" and restarts into it.
-const VERSION = 'overload-v1.0.7';
+const VERSION = 'overload-v1.1.0';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/preact.js', 'js/logic.js', 'js/db.js', 'js/store.js', 'js/icons.js', 'js/ui.js', 'js/charts.js',
-  'js/importer.js', 'js/version.js', 'js/viewport.js', 'js/refraction.js',
+  'js/importer.js', 'js/version.js', 'js/viewport.js', 'js/refraction.js', 'js/anatomy.js', 'js/body.js', 'js/bodydata.js',
   'js/screens/common.js', 'js/screens/summary.js', 'js/screens/workout.js', 'js/screens/active.js',
   'js/screens/machines.js', 'js/screens/progress.js', 'js/screens/history.js', 'js/screens/settings.js',
   'js/screens/onboarding.js', 'js/screens/sheets.js',

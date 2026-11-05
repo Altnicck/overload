@@ -70,7 +70,7 @@ export function PickerSheet({ sheetKey, title = 'Add Exercise', onPick, gymId, m
     const st = index.stats.get(e.id);
     const n = picked.filter(x => x === e.id).length;
     return html`<button key=${e.id} type="button" class="row row-tap" onClick=${() => pick(e.id)}>
-      <${Thumb} photoId=${e.photoId} muscle=${e.muscle} size=${44} name=${e.name} />
+      <${Thumb} ex=${e} size=${44} />
       <div class="row-main">
         <div class="row-title clamp2">${e.name}</div>
         <div class="row-sub">${e.gymId ? (gyms.find(g => g.id === e.gymId) || {}).name || 'Gym' : 'Any gym'}${st && st.bestE ? ' · ' + fmt(st.bestE) + ' kg' : ''}</div>

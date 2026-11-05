@@ -5,6 +5,8 @@ import { LineChart } from '../charts.js';
 import { useStore, useIndex, push, pop, openSheet, closeSheet, saveExercise, deleteExercise, savePhoto, deletePhoto, usePhoto, getState, toast, gymName, saveGym } from '../store.js';
 import { MUSCLES, MODES, MODE, fmt, fmtInt, fmtDate, relDay } from '../logic.js';
 import { ExerciseRow } from './common.js';
+import { BodyThumb, BodyMap } from '../body.js';
+import { musclesFor, muscleRoles, groupMuscles } from '../anatomy.js';
 import { promptSheet } from './sheets.js';
 
 export function MachinesScreen() {
@@ -20,7 +22,7 @@ export function MachinesScreen() {
   const withPhoto = exercises.filter(e => e.photoId).length;
   return html`<${Screen} title="Machines" tab="machines"
       right=${html`<${GlassButton} icon="plus" title="New machine" onClick=${() => { haptic(); openSheet('machineEditor', { gymId: gym !== 'all' && gym !== 'any' ? gym : undefined }); }} />`}>
-    <p class="muted lead">${exercises.length} machines and exercises · ${withPhoto} with photos · no limit</p>
+    <p class="muted lead">${exercises.length} machines · ${withPhoto} with photos</p>
     <label class="search"><${Icon} name="search" size=${18} />
       <input id="machines-search" type="search" placeholder="Search name, muscle or gym" value=${q} onInput=${e => setQ(e.currentTarget.value)} autocomplete="off" />
     </label>
@@ -33,7 +35,7 @@ export function MachinesScreen() {
       </button>
     </div>
     ${groups.map(g => html`<div key=${g.m.id}>
-      <div class="group-label" style=${`--gc:${g.m.color}`}><i class="dot"></i>${g.m.label}<span class="muted"> ${g.items.length}</span></div>
+      <div class="group-label group-label-art"><${BodyThumb} levels=${groupMuscles(g.m.id)} size=${30} radius=${9} />${g.m.label}<span class="muted"> ${g.items.length}</span></div>
       <div class="list">${g.items.map(e => html`<${ExerciseRow} key=${e.id} ex=${e} stat=${index.stats.get(e.id)} onClick=${() => push({ name: 'machine', id: e.id }, 'machines')} showGym=${gym === 'all'} />`)}</div>
     </div>`)}
     ${!list.length && html`<div class="card"><${Empty} icon="grid" title=${query ? 'No matches' : 'No machines here yet'}
@@ -43,13 +45,30 @@ export function MachinesScreen() {
   <//>`;
 }
 
+function MusclesWorked({ ex }) {
+  const roles = muscleRoles(ex);
+  if (!roles.main.length) return null;
+  return html`<section class="card mw-card" aria-label="Muscles worked">
+    <${BodyThumb} levels=${musclesFor(ex)} size=${84} radius=${18} />
+    <div class="row-main">
+      <div class="eyebrow">Muscles worked</div>
+      <div class="mw-main">${roles.main.join(' · ')}</div>
+      ${roles.helping.length > 0 && html`<div class="mw-help">Helped by ${roles.helping.join(', ').toLowerCase()}</div>`}
+    </div>
+  </section>`;
+}
+
 function HeroPhoto({ ex }) {
   const url = usePhoto(ex.photoId, 'full');
   const color = muscleColor(ex.muscle);
   if (url) return html`<button type="button" class="hero-photo" onClick=${() => openSheet('photo', { photoId: ex.photoId, name: ex.name })} aria-label="View photo">
     <img src=${url} alt=${ex.name} /><div class="hero-fade"></div></button>`;
-  return html`<button type="button" class="hero-photo hero-empty" style=${`--mc:${color}`} onClick=${() => openSheet('machineEditor', { id: ex.id, focusPhoto: true })}>
-    <div class="hero-add"><${Icon} name="camera" size=${30} /><span>Add a photo of this machine</span></div><div class="hero-fade"></div></button>`;
+  // No photo yet: show the muscles it works, with a way to add the photo.
+  return html`<div class="hero-photo hero-empty hero-body">
+    <div class="hero-map"><${BodyMap} levels=${musclesFor(ex)} height=${260} /></div>
+    <div class="hero-fade"></div>
+    <button type="button" class="glass hero-cam" onClick=${() => openSheet('machineEditor', { id: ex.id, focusPhoto: true })}><${Icon} name="camera" size=${17} /> Add photo</button>
+  </div>`;
 }
 
 export function MachineScreen({ id, tab }) {
@@ -97,6 +116,7 @@ export function MachineScreen({ id, tab }) {
         ${mode.short && html`<span class="chip chip-static">${mode.label}</span>`}
       </div>
     </div>
+    ${ex.photoId && html`<${MusclesWorked} ex=${ex} />`}
 
     <button type="button" class=${'card card-tap notes-card ' + (ex.notes ? '' : 'notes-empty')} onClick=${() => promptSheet({
       title: 'Machine Settings', label: ex.name, value: ex.notes || '', multiline: true, placeholder: 'Seat 4 · Back pad 2 · Handles middle',
