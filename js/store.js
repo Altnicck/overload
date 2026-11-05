@@ -40,6 +40,8 @@ const subs = new Set();
 let indexCache = { w: null, e: null, idx: null };
 
 export const getState = () => state;
+// Plain listener for non-Preact code (the glass refraction controller). Returns an unsubscribe function.
+export function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
 export function setState(fnOrPatch) {
   const patch = typeof fnOrPatch === 'function' ? fnOrPatch(state) : fnOrPatch;
   if (!patch) return;

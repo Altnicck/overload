@@ -8,6 +8,7 @@ import {
 import { weekRecap, fmt, fmtClock, VERDICTS } from './logic.js';
 import { registerSW, applyUpdate } from './version.js';
 import { initViewportFit } from './viewport.js';
+import { initRefraction } from './refraction.js';
 import { SummaryScreen } from './screens/summary.js';
 import { WorkoutScreen, RoutineScreen, RoutineEditorSheet } from './screens/workout.js';
 import { MachinesScreen, MachineScreen, MachineEditorSheet } from './screens/machines.js';
@@ -206,3 +207,4 @@ render(html`<${App} />`, document.getElementById('app'));
 initViewportFit();
 boot();
 registerSW();
+initRefraction();

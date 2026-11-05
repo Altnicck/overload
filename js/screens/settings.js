@@ -7,6 +7,7 @@ import { decodeImportText, summarizeImport } from '../importer.js';
 import { promptSheet, confirmSheet } from './sheets.js';
 import { APP_VERSION, checkForUpdate } from '../version.js';
 import { screenFit } from '../viewport.js';
+import { refraction } from '../refraction.js';
 
 export function SettingsSheet({ sheetKey, focus }) {
   const { settings, gyms, workouts, exercises } = useStore(s => ({ settings: s.settings, gyms: s.gyms, workouts: s.workouts, exercises: s.exercises }));
@@ -159,6 +160,8 @@ export function SettingsSheet({ sheetKey, focus }) {
     <div class="group-label">About</div>
     <div class="list">
       <div class="row"><div class="row-main"><div class="row-title">Version</div></div><span class="muted num">${APP_VERSION}</span></div>
+      <div class="row"><div class="row-main"><div class="row-title">Glass effect</div><div class="row-sub">How the tab bar bends what is behind it</div></div>
+        <span class=${'num ' + (refraction.mode === 'scroll-timeline' ? 'tint' : 'muted')}>${refraction.mode === 'scroll-timeline' ? 'Refraction' : refraction.mode === 'scroll-listener' ? 'Refraction (backup sync)' : 'Frosted'}</span></div>
       ${screenFit.checked && html`<div class="row"><div class="row-main"><div class="row-title">Screen fit</div><div class="row-sub">Checks that the app reaches the bottom of the screen</div></div>
         <span class=${'num ' + (screenFit.gap ? 'muted' : 'tint')}>${screenFit.gap ? `${screenFit.gap} pt short` : 'Full screen'}</span></div>`}
       <button type="button" class="row row-tap" onClick=${checkForUpdate}><div class="row-main"><div class="row-title tint">Check for updates</div></div><${Icon} name="refresh" size=${18} cls="tint" /></button>
