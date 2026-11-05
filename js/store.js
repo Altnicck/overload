@@ -1,6 +1,7 @@
 // App state: one immutable tree, tiny subscribe/select hook, actions that persist to IndexedDB.
 import { useState, useEffect, useRef } from './preact.js';
 import * as db from './db.js';
+import { readSnapshot, writeSnapshot, markWritten, clearSnapshot } from './snapshot.js';
 import { buildIndex, uid, num, e1rm, bestBefore, hasHistory, lastSession, weekKey, addDays, keyToDate, isDone, fmt } from './logic.js';
 
 export const DEFAULT_SETTINGS = {
@@ -42,11 +43,31 @@ let indexCache = { w: null, e: null, idx: null };
 export const getState = () => state;
 // Plain listener for non-Preact code (the glass refraction controller). Returns an unsubscribe function.
 export function subscribe(fn) { subs.add(fn); return () => subs.delete(fn); }
+// Records that are saved. A change to any of them is copied to the local snapshot right away (the active
+// workout, which changes on every keystroke, a moment later), before its IndexedDB write starts.
+const SAVED = ['settings', 'gyms', 'exercises', 'routines', 'workouts'];
+let snapReady = false;
+let activeSnapTimer = 0;
 export function setState(fnOrPatch) {
   const patch = typeof fnOrPatch === 'function' ? fnOrPatch(state) : fnOrPatch;
   if (!patch) return;
+  const prev = state;
   state = { ...state, ...patch };
+  if (snapReady) {
+    const changed = SAVED.filter(k => prev[k] !== state[k]);
+    if (changed.length) {
+      clearTimeout(activeSnapTimer);
+      writeSnapshot(state, prev.active !== state.active ? [...changed, 'active'] : changed);
+    } else if (prev.active !== state.active) {
+      clearTimeout(activeSnapTimer);
+      activeSnapTimer = setTimeout(() => writeSnapshot(state, ['active']), 120);
+    }
+  }
   for (const fn of subs) fn();
+}
+export function flushSnapshot() {
+  clearTimeout(activeSnapTimer);
+  if (snapReady) writeSnapshot(state);
 }
 export function setUI(fnOrPatch) {
   setState(s => ({ ui: { ...s.ui, ...(typeof fnOrPatch === 'function' ? fnOrPatch(s.ui) : fnOrPatch) } }));
@@ -75,6 +96,7 @@ export function useStore(sel = s => s) {
       if (!shallowEq(v, valRef.current)) { valRef.current = v; force(x => x + 1); }
     };
     subs.add(fn);
+    fn();   // catch a change made between this render and the subscription (boot sets state synchronously)
     return () => subs.delete(fn);
   }, []);
   return val;
@@ -92,24 +114,58 @@ export function useIndex() {
 }
 
 // ---------- boot ----------
-export async function boot() {
-  try {
-    const [settings, active, gyms, exercises, routines, workouts] = await Promise.all([
-      db.kvGet('settings'), db.kvGet('active'),
-      db.getAll('gyms'), db.getAll('exercises'), db.getAll('routines'), db.getAll('workouts'),
-    ]);
-    setState({
-      ready: true,
-      settings: { ...DEFAULT_SETTINGS, ...(settings || {}) },
-      active: active || null,
-      gyms: gyms.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
-      exercises, routines: routines.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), workouts,
-    });
-    db.requestPersist();
-  } catch (err) {
-    console.error(err);
-    setState({ ready: true, error: String(err && err.message || err) });
+function shape(d) {
+  return {
+    settings: { ...DEFAULT_SETTINGS, ...(d.settings || {}) },
+    active: d.active || null,
+    gyms: (d.gyms || []).slice().sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
+    exercises: d.exercises || [],
+    routines: (d.routines || []).slice().sort((a, b) => (a.order ?? 0) - (b.order ?? 0)),
+    workouts: d.workouts || [],
+  };
+}
+
+// Read IndexedDB with time limits; a stuck read is retried once on a fresh connection.
+async function loadDatabase() {
+  try { return await db.withTimeout(db.readAll(), 7000, 'Reading your data took too long'); }
+  catch (e) {
+    db.close();
+    return db.withTimeout(db.readAll(), 9000, 'Reading your data took too long');
   }
+}
+
+export async function boot() {
+  // 1. Open instantly from the local snapshot when there is one.
+  const snap = readSnapshot();
+  if (snap) {
+    setState({ ready: true, error: null, ...shape(snap) });
+    markWritten(state);
+    snapReady = true;
+  }
+  // 2. Load IndexedDB. Without a snapshot it is the data; with one it only has to be brought in line.
+  let data = null;
+  try { data = await loadDatabase(); } catch (err) {
+    console.warn('IndexedDB did not answer', err);
+    if (!snapReady) setState({ ready: true, error: String((err && err.message) || err) });
+    return;
+  }
+  if (!snapReady) {
+    setState({ ready: true, error: null, ...shape(data) });
+    snapReady = true;
+    markWritten({});
+    writeSnapshot(state);
+  } else {
+    // The snapshot is never older than the database; copy over anything a stalled write lost.
+    const cur = { settings: state.settings, active: state.active, gyms: state.gyms, exercises: state.exercises, routines: state.routines, workouts: state.workouts };
+    db.replaceAll(cur, data).then(n => { if (n) console.info(`Database brought up to date (${n} changes)`); }).catch(e => console.warn('Could not update the database', e));
+  }
+  db.requestPersist();
+}
+
+export function retryBoot() {
+  db.close();
+  setState({ ready: false, error: null });
+  boot();
 }
 
 // ---------- settings ----------
@@ -161,7 +217,7 @@ const photoUrls = new Map(); // id -> {thumb, full}
 const photoWaiters = new Map();
 export async function savePhoto(full, thumb) {
   const id = uid('p');
-  await db.put('photos', { id, full, thumb, createdAt: Date.now() });
+  await db.withTimeout(db.put('photos', { id, full, thumb, createdAt: Date.now() }), 12000, 'Saving the photo took too long');
   photoUrls.set(id, { thumb: URL.createObjectURL(thumb), full: URL.createObjectURL(full) });
   return id;
 }
@@ -234,14 +290,22 @@ export function deleteWorkout(id) {
 
 // ---------- active workout ----------
 let activeTimer = null;
+let activeDirty = false;
 function persistActive() {
+  activeDirty = true;
   clearTimeout(activeTimer);
   activeTimer = setTimeout(() => {
+    activeDirty = false;
     if (state.active) db.kvSet('active', state.active); else db.kvDel('active');
   }, 250);
 }
+// Save the active workout now. Only touches IndexedDB when there is an unsaved change: a write that is still
+// running when iOS suspends the app can hold up the next launch.
 export function flushActive() {
   clearTimeout(activeTimer);
+  flushSnapshot();
+  if (!activeDirty) return Promise.resolve();
+  activeDirty = false;
   return state.active ? db.kvSet('active', state.active) : db.kvDel('active');
 }
 function setActive(active) { setState({ active }); persistActive(); }
@@ -353,7 +417,6 @@ export function dismissBanner(key) { setUI(ui => ({ banners: ui.banners.filter(b
 // ---------- import / backup ----------
 export async function applyImport(data, { replace = false } = {}) {
   if (!data || (data.app !== 'overload')) throw new Error('This is not an Overload file.');
-  if (replace) await db.wipeAll();
   const keep = (list, incoming) => {
     const m = new Map(list.map(x => [x.id, x]));
     for (const x of incoming || []) m.set(x.id, x);
@@ -363,28 +426,34 @@ export async function applyImport(data, { replace = false } = {}) {
   const exercises = replace ? (data.exercises || []) : keep(state.exercises, data.exercises);
   const routines = replace ? (data.routines || []) : keep(state.routines, data.routines);
   const workouts = replace ? (data.workouts || []) : keep(state.workouts, data.workouts);
-  await db.putMany('gyms', data.gyms || []);
-  await db.putMany('exercises', data.exercises || []);
-  await db.putMany('routines', data.routines || []);
-  await db.putMany('workouts', data.workouts || []);
-  if (data.photos && data.photos.length) {
-    for (const p of data.photos) {
-      const full = await (await fetch(p.full)).blob();
-      const thumb = p.thumb ? await (await fetch(p.thumb)).blob() : full;
-      await db.put('photos', { id: p.id, full, thumb, createdAt: p.createdAt || Date.now() });
-    }
-  }
   const base = replace ? { ...DEFAULT_SETTINGS } : state.settings;
   const settings = { ...base, ...(data.settings || {}) };
   if (data.kind === 'jefit-import') settings.importedJefit = true;
   if (replace) settings.onboarded = true;
-  await db.kvSet('settings', settings);
-  if (replace && data.active) await db.kvSet('active', data.active);
+  const active = replace ? (data.active || null) : state.active;
+  // Memory and the snapshot first, so the app never waits on IndexedDB for this.
   setState({
     gyms: gyms.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)),
-    exercises, routines: routines.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), workouts, settings,
-    active: replace ? (data.active || null) : state.active,
+    exercises, routines: routines.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)), workouts, settings, active,
   });
+  const writes = (async () => {
+    if (replace) await db.wipeAll();
+    await db.putMany('gyms', data.gyms || []);
+    await db.putMany('exercises', data.exercises || []);
+    await db.putMany('routines', data.routines || []);
+    await db.putMany('workouts', data.workouts || []);
+    if (data.photos && data.photos.length) {
+      for (const p of data.photos) {
+        const full = await (await fetch(p.full)).blob();
+        const thumb = p.thumb ? await (await fetch(p.thumb)).blob() : full;
+        await db.put('photos', { id: p.id, full, thumb, createdAt: p.createdAt || Date.now() });
+      }
+    }
+    await db.kvSet('settings', settings);
+    if (replace && active) await db.kvSet('active', active);
+  })();
+  try { await db.withTimeout(writes, 20000, 'Saving the import took too long'); }
+  catch (e) { console.warn('Import is still being saved', e); }
 }
 
 function blobToDataURL(blob) {
@@ -404,11 +473,12 @@ export async function buildBackup() {
 }
 
 export async function eraseEverything() {
-  await db.wipeAll();
   for (const u of photoUrls.values()) { URL.revokeObjectURL(u.thumb); URL.revokeObjectURL(u.full); }
   photoUrls.clear();
   setState({ settings: { ...DEFAULT_SETTINGS }, gyms: [], exercises: [], routines: [], workouts: [], active: null });
   setUI({ sheets: [], stacks: { summary: [], workout: [], machines: [], progress: [] }, tab: 'summary', workoutOpen: false });
+  try { await db.withTimeout(db.wipeAll(), 15000, 'Erasing took too long'); }
+  catch (e) { console.warn('Erase still running', e); }
 }
 
 // helpers used by screens

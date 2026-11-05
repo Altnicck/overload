@@ -3,8 +3,9 @@ import { Icon } from './icons.js';
 import { haptic, useSwipeBack } from './ui.js';
 import {
   boot, useStore, go, pop, setUI, getState, dismissBanner, closeSheet, openSheet, push, updateSettings,
-  getIndex, recapKeyToShow, flushActive, banner,
+  getIndex, recapKeyToShow, flushActive, flushSnapshot, banner, retryBoot,
 } from './store.js';
+import { close as closeDatabase } from './db.js';
 import { weekRecap, fmt, fmtClock, VERDICTS } from './logic.js';
 import { registerSW, applyUpdate } from './version.js';
 import { initViewportFit } from './viewport.js';
@@ -69,8 +70,11 @@ function useLeaving(list, ms = 320) {
   return leaving.current;
 }
 
-function TabStack({ tab, Root, active }) {
+function TabStack({ tab, Root, active, warm }) {
   const stack = useStore(s => s.ui.stacks[tab]);
+  // A tab's screen is built the first time it is shown (or shortly after start-up), so the first screen appears sooner.
+  const seen = useRef(active);
+  if (active) seen.current = true;
   const leaving = useLeaving(stack, 380);
   // One keyed list: a screen that is popped keeps its DOM node (and its swipe position) while it slides away,
   // instead of being re-created from scratch.
@@ -79,7 +83,7 @@ function TabStack({ tab, Root, active }) {
     ...leaving.map(r => ({ r, under: false, leaving: true })),
   ];
   return html`<div class=${'tabview ' + (active ? 'is-active' : '')} data-tab=${tab} aria-hidden=${!active}>
-    <div class=${'layer layer-root ' + (stack.length ? 'layer-under' : '')}><${Root} /></div>
+    <div class=${'layer layer-root ' + (stack.length ? 'layer-under' : '')}>${seen.current || warm ? html`<${Root} />` : null}</div>
     ${items.map(({ r, under, leaving: lv }) => html`<${Layer} key=${r.key} route=${r} tab=${tab} under=${under} leaving=${lv} />`)}
   </div>`;
 }
@@ -185,27 +189,63 @@ function maybeShowRecap() {
   }), 900);
 }
 
+// Shown only while there is no local snapshot to start from (the first launch after installing or updating to
+// 1.1.1). Explains a slow start instead of showing a frozen logo.
+function Boot() {
+  const [stage, setStage] = useState(0);
+  useEffect(() => {
+    const a = setTimeout(() => setStage(1), 2500);
+    const b = setTimeout(() => setStage(2), 9000);
+    return () => { clearTimeout(a); clearTimeout(b); };
+  }, []);
+  return html`<div class="boot">
+    <div class="boot-inner">
+      <img src="icons/icon-192.png" alt="" width="72" height="72" />
+      <div class="boot-below">
+        ${stage > 0 && html`<p class="boot-msg">Opening your data…</p>`}
+        ${stage > 1 && html`<div class="boot-help">
+          <p class="muted small">This is taking longer than usual. Your data is safe.</p>
+          <button type="button" class="btn btn-glass" onClick=${() => retryBoot()}>Try again</button>
+        </div>`}
+      </div>
+    </div>
+  </div><${Toast} />`;
+}
+
 function App() {
   const { ready, error, onboarded, tab, sheets, workoutOpen, hasActive } = useStore(s => ({
     ready: s.ready, error: s.error, onboarded: s.settings.onboarded, tab: s.ui.tab,
     sheets: s.ui.sheets, workoutOpen: s.ui.workoutOpen, hasActive: !!s.active,
   }));
+  // Build the other tabs one at a time once the first screen is up, so switching to them is instant later
+  // without slowing down the start.
+  const [warm, setWarm] = useState(0);
+  useEffect(() => {
+    if (!ready || warm >= TABS.length) return;
+    const t = setTimeout(() => setWarm(w => w + 1), warm ? 350 : 1200);
+    return () => clearTimeout(t);
+  }, [ready, warm]);
   useEffect(() => {
     if (!ready || !onboarded) return;
     maybeShowRecap();
     const onVis = () => { if (document.visibilityState === 'visible') maybeShowRecap(); else flushActive(); };
     document.addEventListener('visibilitychange', onVis);
-    window.addEventListener('pagehide', flushActive);
-    return () => { document.removeEventListener('visibilitychange', onVis); window.removeEventListener('pagehide', flushActive); };
+    return () => { document.removeEventListener('visibilitychange', onVis); };
   }, [ready, onboarded]);
-  if (!ready) return html`<div class="boot"><img src="icons/icon-192.png" alt="" width="72" height="72" /></div>`;
-  if (error) return html`<div class="boot boot-error"><h2>Overload could not open its data</h2><p class="muted">${error}</p>
-    <p class="muted small">Close the app from the app switcher and open it again. If this keeps happening, restore a backup from Settings.</p></div>`;
+  if (!ready) return html`<${Boot} />`;
+  if (error) return html`<div class="boot boot-error">
+      <img src="icons/icon-192.png" alt="" width="64" height="64" />
+      <h2>Overload could not open your data</h2>
+      <p class="muted">Your workouts are still on this iPhone. Safari's storage did not answer in time, which can happen right after an update.</p>
+      <div class="btn-col"><button type="button" class="btn btn-accent btn-block" onClick=${() => retryBoot()}>Try again</button>
+        <button type="button" class="btn btn-glass btn-block" onClick=${() => location.reload()}>Reload the app</button></div>
+      <p class="muted small">${error}</p>
+    </div><${Toast} />`;
   if (!onboarded) return html`<${Onboarding} /><${Toast} />`;
   const pageSheet = sheets.some(s => !BARE_SHEETS.has(s.name));
   return html`
     <div class=${`app ${pageSheet || (workoutOpen && hasActive) ? 'app-behind' : ''}`}>
-      ${TABS.map(t => html`<${TabStack} key=${t.id} tab=${t.id} Root=${t.Root} active=${t.id === tab} />`)}
+      ${TABS.map((t, i) => html`<${TabStack} key=${t.id} tab=${t.id} Root=${t.Root} active=${t.id === tab} warm=${warm > i} />`)}
       <div class="bottom-chrome">
         <${Accessory} />
         <${TabBar} />
@@ -218,7 +258,13 @@ function App() {
 }
 
 // Keep the active workout safe if iOS suspends or kills the app.
-window.addEventListener('beforeunload', () => { flushActive(); });
+window.addEventListener('pagehide', e => {
+  flushSnapshot();
+  flushActive();
+  // Kept in the back-forward cache: let go of the database so a new page is never left waiting for it.
+  if (e.persisted) closeDatabase();
+});
+window.addEventListener('beforeunload', () => { flushSnapshot(); });
 
 render(html`<${App} />`, document.getElementById('app'));
 initViewportFit();
