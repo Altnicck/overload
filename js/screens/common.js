@@ -41,6 +41,9 @@ export function WorkedCard({ w, exById }) {
   </section>`;
 }
 
+// Leave the list beside the map at least ~45% of the card on narrower phones.
+const mapHeight = max => Math.max(140, Math.min(max, Math.round(((window.innerWidth || 402) - 64) * 0.55)));
+
 // Heat map of recent training: which muscles got work, brighter = more sets.
 export function MusclesCard({ list, exById, days = 7, title = 'Muscles', sub, rows = 5, target = 10, now = new Date() }) {
   const since = now.getTime() - days * 864e5;
@@ -51,7 +54,7 @@ export function MusclesCard({ list, exById, days = 7, title = 'Muscles', sub, ro
   return html`<section class="card heat-card" aria-label=${title}>
     <div class="card-head"><h3>${title}</h3><span class="muted small">${sub || `Last ${days} days`}</span></div>
     <div class="heat-row">
-      <${BodyMap} levels=${levelsFrom(work, { relative: false, target })} height=${rows > 5 ? 214 : 186} />
+      <${BodyMap} levels=${levelsFrom(work, { relative: false, target })} height=${mapHeight(rows > 5 ? 200 : 186)} />
       <div class="heat-list">
         ${top.length ? top.map(t => html`<div class="heat-item" key=${t.id}>
           <div class="heat-top"><span>${t.label}</span><b class="num">${Math.max(1, Math.round(t.sets))}</b></div>

@@ -1,7 +1,7 @@
 import { setUI, toast, flushActive, flushSnapshot, getState } from './store.js';
 import { close as closeDatabase } from './db.js';
 
-export const APP_VERSION = '1.1.1';
+export const APP_VERSION = '1.1.2';
 
 let reg = null;
 let updateReady = false;     // a newer version is in charge; this page is still running the old code

@@ -98,7 +98,8 @@ export function cropBoxes(levels, aspect = 1, { minH = 440, pad = 0.2, views: fo
   return { pl, crops: views.map(v => ({ view: v, box: [FIGURE[v][0] + bx, by, w, h].map(n => Math.round(n)) })) };
 }
 
-function Figure({ view, pl, box, cls = '' }) {
+// The shapes of one view: outline, resting muscles, then the lit ones on top.
+function parts(view, pl) {
   ensureSprite();
   const base = [], lit = [];
   for (const slug of SLUGS[view]) {
@@ -106,10 +107,12 @@ function Figure({ view, pl, box, cls = '' }) {
     if (l) lit.push(html`<use key=${slug} href=${`#bm-${view}-${slug}`} style=${`fill-opacity:${(0.32 + 0.68 * l).toFixed(2)}`} />`);
     else base.push(html`<use key=${slug} href=${`#bm-${view}-${slug}`} class=${MUSCLE.has(slug) ? 'bm-base' : 'bm-skin'} />`);
   }
+  return html`<use href=${`#bm-${view}-outline`} class="bm-outline" /><g>${base}</g><g class="bm-lit">${lit}</g>`;
+}
+
+function Figure({ view, pl, box, cls = '' }) {
   return html`<svg class=${'bm-fig ' + cls} viewBox=${box.join(' ')} preserveAspectRatio="xMidYMid meet" aria-hidden="true" focusable="false">
-    <use href=${`#bm-${view}-outline`} class="bm-outline" />
-    <g>${base}</g>
-    <g class="bm-lit">${lit}</g>
+    ${parts(view, pl)}
   </svg>`;
 }
 
@@ -172,11 +175,26 @@ export function BodyThumb({ levels, size = 48, width, height, radius, cls = '', 
   </div>`;
 }
 
-// Whole figures, front and back, for heroes and heat maps.
-export function BodyMap({ levels, height = 220, views = ['front', 'back'], cls = '', captions = false }) {
+// Whole figures, front and back, for heroes and heat maps. Both views sit in one SVG (the artwork already places
+// the back view to the right of the front one), drawn at an exact pixel size, so no browser has to work the size
+// out from aspect ratios. `fill` makes it fill its container instead (the machine page header).
+export function BodyMap({ levels, height = 220, views = ['front', 'back'], cls = '', captions = false, fill = false }) {
   const pl = partLevels(levels);
-  return html`<div class=${'bm-map ' + cls} style=${`height:${height}px`} aria-hidden="true">
-    ${views.map(v => { const [x, y, w, h] = FIGURE[v]; const box = [x - 8, y - 6, w + 16, h + 12];
-      return html`<div class="bm-col" key=${v}><${Figure} view=${v} pl=${pl[v]} box=${box} />${captions && html`<span class="bm-cap">${v === 'front' ? 'Front' : 'Back'}</span>`}</div>`; })}
+  const pad = 10;
+  const boxes = views.map(v => FIGURE[v]);
+  const x0 = Math.min(...boxes.map(f => f[0])) - pad;
+  const x1 = Math.max(...boxes.map(f => f[0] + f[2])) + pad;
+  const y0 = FIGURE.front[1] - pad, h = FIGURE.front[3] + pad * 2;
+  const vb = [x0, y0, x1 - x0, h];
+  const width = Math.round(height * vb[2] / vb[3]);
+  return html`<div class=${'bm-map ' + (fill ? 'bm-fill ' : '') + cls} aria-hidden="true">
+    <div class="bm-box" style=${fill ? '' : `width:${width}px;height:${height}px`}>
+      <svg class="bm-svg" viewBox=${vb.join(' ')} preserveAspectRatio="xMidYMid meet" width="100%" height="100%" focusable="false">
+        ${views.map(v => html`<g key=${v}>${parts(v, pl[v])}</g>`)}
+      </svg>
+    </div>
+    ${captions && html`<div class="bm-caps" style=${fill ? '' : `width:${width}px`}>
+      ${views.map(v => { const f = FIGURE[v]; return html`<span key=${v} style=${`left:${(((f[0] + f[2] / 2) - x0) / vb[2] * 100).toFixed(1)}%`}>${v === 'front' ? 'Front' : 'Back'}</span>`; })}
+    </div>`}
   </div>`;
 }

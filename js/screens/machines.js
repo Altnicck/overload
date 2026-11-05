@@ -65,7 +65,7 @@ function HeroPhoto({ ex }) {
     <img src=${url} alt=${ex.name} /><div class="hero-fade"></div></button>`;
   // No photo yet: show the muscles it works, with a way to add the photo.
   return html`<div class="hero-photo hero-empty hero-body">
-    <div class="hero-map"><${BodyMap} levels=${musclesFor(ex)} height=${260} /></div>
+    <div class="hero-map"><${BodyMap} levels=${musclesFor(ex)} fill /></div>
     <div class="hero-fade"></div>
     <button type="button" class="glass hero-cam" onClick=${() => openSheet('machineEditor', { id: ex.id, focusPhoto: true })}><${Icon} name="camera" size=${17} /> Add photo</button>
   </div>`;
