@@ -207,6 +207,33 @@ export function bestBefore(index, exId, beforeT = Infinity, excludeWid) {
   return b;
 }
 
+// All-time record on a machine, by est. 1RM (the measure PR alerts use), including sets ticked in the workout in
+// progress. Null on a first visit: that session only sets the baseline.
+// Returns { w, r, e, t } from history, { e, jefit: true } for a best known only from Jefit, or { w, r, e, today: true }.
+export function allTimeBest(index, exId, active) {
+  const ex = index.exById.get(exId);
+  const st = index.stats.get(exId);
+  const base = ex && ex.baseline && ex.baseline.e1rm > 0 ? ex.baseline.e1rm : 0;
+  let rec = null;
+  if (st && st.best) {
+    // Bodyweight-only history has no est. 1RM; the top set (most weight, then most reps) stands in.
+    const b = st.best.e > 0 ? st.best : st.heavy || st.best;
+    rec = { w: b.w, r: b.r, e: st.best.e, t: b.t };
+  }
+  if (base > 0 && (!rec || base >= rec.e - 1e-9)) rec = { e: base, jefit: true };
+  if (!rec) return null;
+  let today = null;
+  for (const en of (active && active.entries) || []) {
+    if (en.exId !== exId) continue;
+    for (const s of en.sets) {
+      if (!s.done) continue;
+      const e = e1rm(s.w, s.r);
+      if (e > 0 && (!today || e > today.e)) today = { w: num(s.w), r: num(s.r), e, today: true };
+    }
+  }
+  return today && today.e > rec.e + 1e-6 ? today : rec;
+}
+
 export function hasHistory(index, exId, excludeWid) {
   const ex = index.exById.get(exId);
   if (ex && ex.baseline && ex.baseline.e1rm > 0) return true;

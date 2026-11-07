@@ -1,7 +1,7 @@
 // Offline-first service worker: the whole app is cached, so it opens instantly with no signal.
 // Bump VERSION on every release. A new version takes over as soon as it is downloaded; the open page then
 // switches to it at a safe moment (during start-up, in the background, or when the person taps Restart).
-const VERSION = 'overload-v1.1.2';
+const VERSION = 'overload-v1.1.3';
 const ASSETS = [
   './', 'index.html', 'manifest.webmanifest', 'css/app.css',
   'js/app.js', 'js/preact.js', 'js/logic.js', 'js/db.js', 'js/store.js', 'js/snapshot.js', 'js/icons.js', 'js/ui.js', 'js/charts.js',

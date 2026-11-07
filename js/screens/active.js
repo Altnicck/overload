@@ -5,7 +5,7 @@ import {
   useStore, useIndex, getState, setUI, updateActive, newEntry, checkSetPR, finishActive, discardActive,
   openSheet, closeSheet, banner, toast, saveExercise, gymName, getIndex, updateSettings, push, flushActive,
 } from '../store.js';
-import { fmt, fmtInt, fmtClock, fmtDate, fmtDuration, lastSession, num, e1rm, MODE, workoutVolume, wTime, lifetimeCount, fmtTime, ymd } from '../logic.js';
+import { fmt, fmtInt, fmtClock, fmtDate, fmtDuration, lastSession, allTimeBest, num, e1rm, MODE, workoutVolume, wTime, lifetimeCount, fmtTime, ymd, plural } from '../logic.js';
 import { confirmSheet, promptSheet } from './sheets.js';
 import { Delta, WorkedCard } from './common.js';
 
@@ -112,7 +112,21 @@ function SetRow({ en, ei, s, si, last, mode }) {
   </div>`;
 }
 
-function ExerciseBlock({ en, ei, total, ex, last, workoutId }) {
+// "Last" and "PR" lines under the exercise name: the last session's sets, and the all-time best set.
+function ExerciseHistory({ last, best, mode }) {
+  if (!last && !best) return html`<div class="ex-hist"><span class="ex-first">First time on this machine. This session sets your baseline.</span></div>`;
+  const unit = `kg${mode.short}`;
+  return html`<div class="ex-hist">
+    ${last && html`<span class="ex-k">Last · ${fmtDate(last.t)}</span>
+      <span class="ex-v"><b class="ex-sets">${last.sets.map(s => `${fmt(s.w)}×${s.r}`).join(' ')}</b></span>`}
+    ${best && html`<span class=${'ex-k ex-k-pr' + (best.today ? ' is-new' : '')}><${Icon} name="trophy" size=${13} stroke=${2.4} /><span class="ex-pr-word">PR</span> · ${best.today ? 'Today' : best.jefit ? 'Jefit' : fmtDate(best.t)}</span>
+      <span class=${'ex-v' + (best.today ? ' is-new' : '')}>${best.jefit
+        ? html`<b>${fmt(best.e)} ${unit}</b> est. 1RM`
+        : html`<b>${fmt(best.w)}×${best.r}</b>${best.e > 0 ? ` · est. 1RM ${fmt(best.e)} ${unit}` : ''}`}</span>`}
+  </div>`;
+}
+
+function ExerciseBlock({ en, ei, total, ex, last, best, workoutId }) {
   const mode = MODE[ex ? ex.mode : 'total'] || MODE.total;
   const doneSets = en.sets.filter(s => s.done);
   const sessionBest = doneSets.reduce((m, s) => Math.max(m, e1rm(s.w, s.r)), 0);
@@ -137,9 +151,7 @@ function ExerciseBlock({ en, ei, total, ex, last, workoutId }) {
       <button type="button" class="icon-btn" aria-label="Exercise options" onClick=${menu}><${Icon} name="dots" size=${22} stroke=${3} /></button>
     </div>
     ${ex && ex.notes ? html`<button type="button" class="ex-notes" onClick=${() => editNotes(ex)}><${Icon} name="sliders" size=${15} /> <span>${ex.notes}</span></button>` : ''}
-    <div class="ex-last">${last
-      ? html`<span>Last · ${fmtDate(last.t)}</span><b>${last.sets.map(s => `${fmt(s.w)}×${s.r}`).join('  ')}</b>`
-      : html`<span>First time on this machine. This session sets your baseline.</span>`}</div>
+    <${ExerciseHistory} last=${last} best=${best} mode=${mode} />
     <div class="set-head" aria-hidden="true"><span>Set</span><span>Previous</span><span>kg${mode.short}</span><span>Reps</span><span></span></div>
     ${en.sets.map((s, si) => html`<${SetRow} key=${si} en=${en} ei=${ei} s=${s} si=${si} last=${last} mode=${mode} />`)}
     <div class="ex-foot">
@@ -246,15 +258,17 @@ export function ActiveWorkout() {
       <div class="scroller-inner">
         <div class="cover-meta">
           <button type="button" class="chip" onClick=${changeGym}><${Icon} name="pin" size=${14} stroke=${2.3} /> ${gymName(active.gymId)}</button>
-          <span class="chip chip-static num">${sets} sets · ${fmtInt(volume)} kg</span>
-          <button type="button" class="chip" onClick=${menu} aria-label="Workout options"><${Icon} name="dots" size=${16} stroke=${3} /></button>
+          <div class="cover-meta-group">
+            <span class="chip chip-static num">${plural(active.entries.length, 'exercise')} · ${plural(sets, 'set')} · ${fmtInt(volume)} kg</span>
+            <button type="button" class="chip" onClick=${menu} aria-label="Workout options"><${Icon} name="dots" size=${16} stroke=${3} /></button>
+          </div>
         </div>
         ${planned > 0 && html`<div class="cover-progress" aria-label=${`${sets} of ${planned} sets done`}>
           <div class="cp-bar"><i style=${`width:${Math.min(100, (sets / planned) * 100)}%`}></i></div>
           <span class="num">${sets}/${planned} sets</span>
         </div>`}
         ${active.entries.map((en, ei) => html`<${ExerciseBlock} key=${en.id} en=${en} ei=${ei} total=${active.entries.length} ex=${exById.get(en.exId)}
-            last=${lastSession(index, en.exId, Infinity, active.id)} workoutId=${active.id} />`)}
+            last=${lastSession(index, en.exId, Infinity, active.id)} best=${allTimeBest(index, en.exId, active)} workoutId=${active.id} />`)}
         ${!active.entries.length && html`<div class="card cover-empty">
           <div class="empty-ic"><${Icon} name="dumbbell" size=${28} /></div>
           <h3>Add your first machine</h3>
